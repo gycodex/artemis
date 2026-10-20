@@ -239,6 +239,42 @@ def test_cli_mcp_generate_config_codex():
     ]
 
 
+def test_cli_mcp_generate_direct_config_for_codex_and_claude():
+    """Direct mode delegates reasoning to the MCP host and needs no model key."""
+    from artemis.interfaces.cli.commands.mcp import _get_config_snippet
+
+    codex = _get_config_snippet("codex", "python", "/project", "direct", "emulator-5554")[
+        "mcp_servers"
+    ]["artemis"]
+    assert codex["args"] == ["-m", "artemis", "mcp", "--type", "direct"]
+    assert codex["env"]["ARTEMIS_DEVICE_ID"] == "emulator-5554"
+    assert codex["required"] is False
+    assert "observe_screen" in codex["enabled_tools"]
+    assert "read_logcat" in codex["enabled_tools"]
+    assert "session_start" in codex["enabled_tools"]
+    assert "session_finish" in codex["enabled_tools"]
+    assert "mobile_run_task" not in codex["enabled_tools"]
+
+    claude = _get_config_snippet("claude", "python", "/project", "direct")["mcpServers"]["artemis"]
+    assert claude["args"] == ["-m", "artemis", "mcp", "--type", "direct"]
+
+    result = runner.invoke(
+        app,
+        [
+            "mcp",
+            "--type",
+            "direct",
+            "--device",
+            "emulator-5554",
+            "--generate-config",
+            "codex",
+        ],
+    )
+    assert result.exit_code == 0
+    assert '"direct"' in result.output
+    assert "ARTEMIS_DEVICE_ID" in result.output
+
+
 def test_cli_mcp_install_antigravity(tmp_path, monkeypatch):
     """Verify 'artemis mcp --install antigravity' writes configuration and global rules into target files."""
     monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
@@ -441,6 +477,64 @@ def test_cli_mcp_install_codex_preserves_config_and_is_idempotent(tmp_path, monk
     agents_text = agents_file.read_text(encoding="utf-8")
     assert "Mobile Testing Mindset" in agents_text
     assert agents_text.count("<!-- BEGIN ARTEMIS MOBILE TESTING RULES -->") == 1
+
+
+def test_cli_mcp_install_codex_direct_mode(tmp_path, monkeypatch):
+    """Direct install writes the host-driven server and optional device binding."""
+    monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
+    monkeypatch.setattr("mcp_server.utils.env_utils.get_project_root", lambda: str(tmp_path))
+
+    result = runner.invoke(
+        app,
+        [
+            "mcp",
+            "--type",
+            "direct",
+            "--device",
+            "emulator-5554",
+            "--install",
+            "codex",
+        ],
+    )
+    assert result.exit_code == 0
+
+    import tomllib
+
+    data = tomllib.loads((tmp_path / ".codex" / "config.toml").read_text(encoding="utf-8"))
+    server = data["mcp_servers"]["artemis"]
+    assert server["args"] == ["-m", "artemis", "mcp", "--type", "direct"]
+    assert server["env"]["ARTEMIS_DEVICE_ID"] == "emulator-5554"
+    assert server["required"] is False
+    assert "observe_screen" in server["enabled_tools"]
+    assert "session_start" in server["enabled_tools"]
+    assert "session_finish" in server["enabled_tools"]
+    assert "mobile_run_task" not in server["enabled_tools"]
+
+
+def test_merge_codex_toml_preserves_windows_backslashes(tmp_path):
+    """Updating an existing managed block must not collapse Windows path escapes."""
+    from artemis.interfaces.cli.commands.mcp import _get_config_snippet, _merge_codex_toml
+
+    config_path = tmp_path / "config.toml"
+    first = _get_config_snippet(
+        "codex", r"E:\IdeaWork\artemis\.venv\Scripts\python.exe", r"E:\IdeaWork\artemis"
+    )["mcp_servers"]["artemis"]
+    assert _merge_codex_toml(config_path, first)
+
+    direct = _get_config_snippet(
+        "codex",
+        r"E:\IdeaWork\artemis\.venv\Scripts\python.exe",
+        r"E:\IdeaWork\artemis",
+        "direct",
+        "127.0.0.1:7555",
+    )["mcp_servers"]["artemis"]
+    assert _merge_codex_toml(config_path, direct)
+
+    import tomllib
+
+    data = tomllib.loads(config_path.read_text(encoding="utf-8"))
+    assert data["mcp_servers"]["artemis"]["command"] == first["command"]
+    assert data["mcp_servers"]["artemis"]["env"]["ARTEMIS_DEVICE_ID"] == "127.0.0.1:7555"
 
 
 def test_cli_mcp_install_jsonc_and_backup(tmp_path, monkeypatch):

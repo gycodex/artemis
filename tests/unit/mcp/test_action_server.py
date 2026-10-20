@@ -142,6 +142,29 @@ async def test_screenshot_and_hierarchy_helpers():
         await session.aclose()
 
 
+async def test_take_screenshot_returns_native_mcp_image():
+    session = await _session_for(MockActuator())
+    try:
+        raw = await session.call_raw("take_screenshot", {})
+        images = [block for block in raw.content if block.type == "image"]
+        assert len(images) == 1
+        assert images[0].mimeType == "image/jpeg"
+        assert images[0].data == raw.structuredContent["image_b64"]
+    finally:
+        await session.aclose()
+
+
+async def test_observe_screen_can_return_image_and_indexed_hierarchy():
+    session = await _session_for(MockActuator())
+    try:
+        raw = await session.call_raw("observe_screen", {"settle_ms": 0, "include_image": True})
+        assert raw.structuredContent["ok"] is True
+        assert raw.structuredContent["screenshot_path"]
+        assert any(block.type == "image" for block in raw.content)
+    finally:
+        await session.aclose()
+
+
 async def test_structured_content_carries_real_status():
     """The wire result exposes ok/code so no consumer ever sniffs substrings again."""
     session = await _session_for(MockActuator())

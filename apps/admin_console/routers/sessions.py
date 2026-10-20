@@ -15,7 +15,6 @@
 import asyncio
 import json
 import time
-from uuid import UUID
 from fastapi import APIRouter, HTTPException
 
 from artemis.config import DB_PATH, TRACES_PATH
@@ -51,6 +50,7 @@ async def list_sessions():
 
 
 def _list_sessions_sync():
+    session_repo.sync_direct_sessions(TRACES_PATH)
     rows = session_repo.get_all_sessions()
     video_rec_map = session_repo.get_video_recordings_map()
     latest_recordings = session_repo.get_latest_video_recordings_map()
@@ -77,6 +77,7 @@ def _list_sessions_sync():
         recording = latest_recordings.get(s_id)
         d_info_raw = row_dict.get("device_info")
         device_id = None
+        d_info = None
         if d_info_raw:
             try:
                 d_info = json.loads(d_info_raw) if isinstance(d_info_raw, str) else d_info_raw
@@ -89,6 +90,9 @@ def _list_sessions_sync():
             device_id = recording.get("device_id")
         row_dict["device_id"] = device_id
         row_dict["device_serial"] = device_id
+        if isinstance(d_info, dict):
+            row_dict["profile"] = d_info.get("profile")
+            row_dict["direct_artifacts"] = d_info.get("artifacts")
 
         if row_dict.get("status") == "running":
             is_active = (
@@ -230,7 +234,7 @@ async def delete_session_endpoint(session_id: str):
         from artemis.data_engine.storage import StorageManager
 
         storage = StorageManager(DB_PATH, TRACES_PATH)
-        storage.delete_session(UUID(session_id))
+        storage.delete_session(session_id)
         return {
             "status": "success",
             "message": f"Session {session_id} deleted successfully",

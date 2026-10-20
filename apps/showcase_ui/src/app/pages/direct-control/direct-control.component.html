@@ -1,0 +1,124 @@
+<main class="direct-page">
+  <header class="direct-header">
+    <div>
+      <div class="eyebrow">HOST-DRIVEN DEVICE TESTING</div>
+      <h1>Direct Control</h1>
+      <p>Operate Android from the browser, capture evidence, and generate a report — no model API key required.</p>
+    </div>
+    <div class="status-pill" [class.active]="active()">
+      <span class="status-dot"></span>
+      {{ active() ? 'Session active' : 'Ready to start' }}
+    </div>
+  </header>
+
+  @if (!active()) {
+    <section class="start-card">
+      <div class="field">
+        <label>Android device</label>
+        <select [ngModel]="selectedDevice()" (ngModelChange)="selectedDevice.set($event)">
+          <option value="" disabled>Select a connected device</option>
+          @for (device of system.connectedDevices(); track device.serial) {
+            <option [value]="device.serial">{{ device.serial }} · {{ device.model || 'Android' }}</option>
+          }
+        </select>
+      </div>
+      <div class="field">
+        <label>Session name</label>
+        <input [ngModel]="sessionName()" (ngModelChange)="sessionName.set($event)" />
+      </div>
+      <div class="field">
+        <label>Package name <span>optional</span></label>
+        <input placeholder="com.example.app" [ngModel]="packageName()" (ngModelChange)="packageName.set($event)" />
+      </div>
+      <button class="primary" [disabled]="!canStart()" (click)="start()">
+        {{ busy() ? 'Starting…' : 'Start Direct Session' }}
+      </button>
+      <p class="hint">Direct mode requires only ADB. It does not initialize Flash, Pro, or any cloud model.</p>
+    </section>
+  } @else {
+    <section class="control-grid">
+      <div class="phone-column">
+        <div class="panel-title">
+          <div><strong>Live device</strong><span>{{ selectedDevice() }}</span></div>
+          <button class="icon-button" [disabled]="busy()" (click)="observe()" title="Refresh screen">
+            <span class="material-symbols-outlined">refresh</span>
+          </button>
+        </div>
+        <div class="phone-shell" [class.loading]="busy()">
+          @if (screenshot()) {
+            <img [src]="screenshot()" alt="Android screen" (click)="onScreenClick($event)" />
+          } @else {
+            <div class="screen-placeholder">Refresh to capture the device screen</div>
+          }
+          @if (busy()) { <div class="screen-busy"><span class="spinner"></span></div> }
+        </div>
+        <p class="screen-help">Click the screen to tap. Coordinates are normalized to 0–1000.</p>
+        <div class="quick-actions">
+          <button (click)="pressKey('back')"><span class="material-symbols-outlined">arrow_back</span>Back</button>
+          <button (click)="pressKey('home')"><span class="material-symbols-outlined">home</span>Home</button>
+          <button (click)="swipe('down')"><span class="material-symbols-outlined">arrow_downward</span>Swipe down</button>
+          <button (click)="swipe('up')"><span class="material-symbols-outlined">arrow_upward</span>Swipe up</button>
+        </div>
+      </div>
+
+      <div class="tools-column">
+        <section class="tool-card">
+          <h2>App & input</h2>
+          <label>Android package</label>
+          <div class="inline-row">
+            <input placeholder="com.example.app" [ngModel]="packageName()" (ngModelChange)="packageName.set($event)" />
+            <button class="secondary" (click)="launchApp()">Launch</button>
+          </div>
+          <label>Text input</label>
+          <div class="inline-row">
+            <input placeholder="Click a field, then type here" [ngModel]="textInput()" (ngModelChange)="textInput.set($event)" />
+            <button class="secondary" (click)="inputText()">Send</button>
+          </div>
+          @if (lastClick()) { <small>Last tap: [{{ lastClick()![0] }}, {{ lastClick()![1] }}]</small> }
+        </section>
+
+        <section class="tool-card">
+          <h2>Checkpoint</h2>
+          <label>Name</label>
+          <input [ngModel]="checkpointName()" (ngModelChange)="checkpointName.set($event)" />
+          <label>Details</label>
+          <textarea rows="3" [ngModel]="checkpointDetails()" (ngModelChange)="checkpointDetails.set($event)"></textarea>
+          <div class="inline-row">
+            <button class="pass" (click)="addCheckpoint(true)">Record PASS</button>
+            <button class="fail" (click)="addCheckpoint(false)">Record FAIL</button>
+          </div>
+        </section>
+
+        <section class="tool-card finish-card">
+          <h2>Finish & report</h2>
+          <textarea rows="3" [ngModel]="summary()" (ngModelChange)="summary.set($event)"></textarea>
+          <div class="inline-row">
+            <button class="primary" (click)="finish('passed')">Finish passed</button>
+            <button class="danger" (click)="finish('failed')">Finish failed</button>
+          </div>
+        </section>
+      </div>
+
+      <aside class="activity-column">
+        <div class="metrics">
+          <div><strong>{{ actionCount() }}</strong><span>Actions</span></div>
+          <div><strong>{{ checkpointCount() }}</strong><span>Checks</span></div>
+        </div>
+        <h2>Activity</h2>
+        @for (event of events(); track event.time + event.title) {
+          <div class="event" [class.failed]="!event.ok">
+            <span class="event-dot"></span>
+            <div><strong>{{ event.title }}</strong><p>{{ event.detail }}</p><small>{{ event.time }}</small></div>
+          </div>
+        } @empty {
+          <p class="empty">Device actions and checkpoints appear here.</p>
+        }
+      </aside>
+    </section>
+  }
+
+  @if (error()) { <div class="error-toast">{{ error() }}</div> }
+  @if (reportPath()) {
+    <div class="report-banner"><strong>Report generated</strong><code>{{ reportPath() }}</code></div>
+  }
+</main>

@@ -1,6 +1,22 @@
 # 🔌 Universal MCP Server for ARTEMIS
 
-This directory contains the **Model Context Protocol (MCP)** server for **ARTEMIS**. It exposes mobile device automation to clients such as **Antigravity**, **Cursor**, **Claude Code**, **OpenClaw**, and **Windsurf**.
+ARTEMIS exposes mobile device automation to MCP hosts such as **Codex**, **Claude Code**, **Antigravity**, **Cursor**, **OpenClaw**, and **Windsurf**. It supports two complementary server modes:
+
+| Mode | Who reasons about the screen? | Artemis model key | Best for |
+| :--- | :--- | :--- | :--- |
+| `direct` | The connected MCP host | Not required | Codex, Claude Code, and any multimodal MCP client |
+| `agent` | Artemis Flash or Pro | Required (or a local compatible endpoint) | Detached autonomous runs, checkpoints, traces, and long monitoring tasks |
+
+Direct mode is implemented in `artemis/mcp/direct_server.py`; this directory contains the autonomous Agent-mode server.
+
+Direct mode also includes an optional host-driven session workflow:
+
+1. `session_start` creates an artifact directory and enables action recording.
+2. Normal device actions automatically save and return a post-action observation by default.
+3. `session_checkpoint` records an assertion evaluated by the MCP host.
+4. `session_finish` saves Markdown and JSON reports, screenshots, and optional bounded Logcat output.
+
+The session layer does not create an Artemis model or require another API key.
 
 ## 🏗️ Architecture
 
@@ -73,6 +89,12 @@ When you run `uv run artemis mcp --install all` (or target a specific IDE like `
 
 ## 🛠️ MCP Tools Overview
 
+### Direct mode
+
+Direct mode exposes normalized device actions (`click`, `click_sequence`, `long_press`, `input_text`, `swipe`, `press_key`, `manage_app`, waits, and links), native MCP image observations (`observe_screen`, `take_screenshot`), UI hierarchy, connected/selected-device metadata, and bounded read-only Logcat snapshots. Coordinates use a 0–1000 scale, independent of physical screen resolution. `observe_screen` also saves the screenshot and returns its path.
+
+### Agent mode
+
 * **`mobile_run_task`**: Asynchronously launches an autonomous mobile automation task (`Flash` or `Pro` model) with optional `device_serial` targeting. Pro runs can be tuned with `verification_level` (`off` | `final` | `checkpoints` | `strict` — how much the Checker audits) and `explorer_mode` (`flash` | `pro` | `ultra` — the Operator's perception depth).
 * **`mobile_manage_task`**: Manages task lifecycle (`status`, `stop`, `inject_instruction`), returning task state and assigned `device_serial`. Pass `release_loop=True` with `inject_instruction` to gracefully end a `[Loop:continuous]` monitoring task — this explicit signal (not "please stop" wording) is what unlocks the loop milestone's completion.
 * **`mobile_get_device_state`**: Real-time observer (`screenshot` or OCR+XML `hierarchy`) with optional `device_serial`.
@@ -105,7 +127,14 @@ Run the automated installer to detect and configure your IDE (Antigravity, Curso
 uv run artemis mcp --install all
 # Or install specifically for Antigravity:
 uv run artemis mcp --install antigravity
+
+# Recommended for Codex or Claude Code: let the host model drive the device.
+uv run artemis mcp --type direct --install codex
+uv run artemis mcp --type direct --install claude
+
+# Bind Direct mode when more than one device is connected.
+uv run artemis mcp --type direct --device emulator-5554 --install codex
 ```
 
 #### Manual JSON Config Generation
-Run `uv run artemis mcp --generate-config antigravity` (or `all`) to output ready-to-use configuration JSON with resolved `.venv` Python and project paths.
+Run `uv run artemis mcp --type direct --generate-config codex` (or another client name) to output ready-to-use configuration with resolved Python and project paths. Omit `--type direct` to generate the autonomous Agent-mode configuration.

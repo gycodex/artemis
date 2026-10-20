@@ -113,11 +113,33 @@ cd artemis
 
 ARTEMIS includes a native **Model Context Protocol (MCP)** server. Connect your real phone directly into AI IDEs:
 
+ARTEMIS offers two MCP modes:
+
+| Mode | Reasoning engine | Extra model credentials | Use when |
+| :--- | :--- | :--- | :--- |
+| **Direct** (recommended for Codex / Claude Code) | Your current MCP host | **None** | You want the host to inspect screenshots, operate the device, and read Logcat itself |
+| **Agent** (default, backward compatible) | ARTEMIS Flash / Pro | A configured cloud key or local compatible model endpoint | You want detached autonomous jobs, checkpoints, traces, or long-running monitoring |
+
+Direct mode does not reuse or extract a host login token. It simply avoids a second model: Codex, Claude Code, or another multimodal MCP client performs the reasoning and calls ARTEMIS's typed device tools.
+
+Direct mode completes the MCP handshake before connecting to Android and is installed as an optional Codex server. An offline emulator therefore cannot prevent Codex from loading conversations; device errors are reported only when a device tool is called.
+
+In Direct mode, the host normally calls `observe_screen(include_image=true)`, chooses an action, calls a normalized 0–1000 coordinate tool such as `click`, and observes again to verify the result. Explicit observations made during a session are archived as evidence, and finished MCP sessions appear in the same Workspace history as Web Direct runs. A configured TCP emulator serial such as `127.0.0.1:7555` is automatically reconnected after a local ADB restart. `read_logcat` provides a bounded, read-only diagnostic snapshot.
+
+For multi-step validation, Direct mode also has a model-free session layer: call `session_start`, use the normal device tools, record host-evaluated assertions with `session_checkpoint`, and call `session_finish`. While a session is active, actions are recorded and can automatically return and save a post-action observation. Finishing writes `report.md`, `session.json`, screenshots, and an optional bounded `logcat.txt` under the Artemis traces directory. This adds Agent-like evidence and reporting while Codex or Claude Code remains the only reasoning model.
+
 ### 1. One-Click Auto Install (Recommended)
 
 Running `./start.sh` (macOS/Linux) or `.\start.bat` (Windows PowerShell) will prompt you to configure global MCP and testing rules for detected IDEs (or you can install/update anytime later manually using the commands below):
 
 ```bash
+# Recommended: no separate ARTEMIS model API key
+uv run artemis mcp --type direct --install codex
+uv run artemis mcp --type direct --install claude
+
+# If multiple devices are connected, bind one by serial
+uv run artemis mcp --type direct --device emulator-5554 --install codex
+
 # Auto-install MCP server & global rules for Antigravity / Jetski:
 uv run artemis mcp --install antigravity
 
@@ -130,13 +152,13 @@ uv run artemis mcp --install all
 
 ### 2. Manual Configuration (Optional)
 
-If you prefer to configure manually, run `uv run artemis mcp --generate-config <client>` (for example, `codex` or `antigravity`) to output the appropriate TOML or JSON snippet. Replace `/path/to/artemis` with your actual repo path and point `command` to your `.venv` Python executable:
+If you prefer to configure manually, run `uv run artemis mcp --type direct --generate-config <client>` (for example, `codex` or `claude`) to output the appropriate TOML or JSON snippet. Omit `--type direct` for the autonomous Agent mode. Replace `/path/to/artemis` with your actual repo path and point `command` to your `.venv` Python executable:
 
 * **Codex** (`~/.codex/config.toml`):
 ```toml
 [mcp_servers.artemis]
 command = "/path/to/artemis/.venv/bin/python"
-args = ["-m", "mcp_server"]
+args = ["-m", "artemis", "mcp", "--type", "direct"]
 cwd = "/path/to/artemis"
 
 [mcp_servers.artemis.env]
@@ -150,18 +172,12 @@ PYTHONPATH = "/path/to/artemis"
   "mcpServers": {
     "artemis": {
       "command": "/path/to/artemis/.venv/bin/python",
-      "args": ["-m", "mcp_server"],
+      "args": ["-m", "artemis", "mcp", "--type", "direct"],
       "cwd": "/path/to/artemis",
       "env": {
         "PYTHONUNBUFFERED": "1"
       },
-      "tools": {
-        "mobile_run_task": { "eager": true },
-        "mobile_manage_task": { "eager": true },
-        "mobile_get_device_state": { "eager": true },
-        "mobile_inspect_trace": { "eager": true },
-        "mobile_diagnose": { "eager": true }
-      }
+      "disabledTools": []
     }
   }
 }
@@ -173,7 +189,7 @@ PYTHONPATH = "/path/to/artemis"
   "mcpServers": {
     "artemis": {
       "command": "/path/to/artemis/.venv/bin/python",
-      "args": ["-m", "mcp_server"],
+      "args": ["-m", "artemis", "mcp", "--type", "direct"],
       "cwd": "/path/to/artemis"
     }
   }
@@ -246,7 +262,7 @@ if __name__ == "__main__":
   <sub><b>Console Overview</b>: <b>① View Switcher</b> (Home / Workspace) · <b>② Model & Replay</b> (Flash/Pro status & video replay) · <b>③ Live Agent Stream</b> (Action perception, target coordinates & structured results) · <b>④ Prompt Dock</b> (Natural language dispatch) · <b>⑤ Task Queue & Dashboard</b> (Lifecycle & history)</sub>
 </p>
 
-* **Web Visual Test Console (`uv run artemis ui`)**: Real-time screen projection and interactive panel, supporting natural language test dispatch, live reasoning telemetry, action trajectories, and execution replay; manage server lifecycle anytime from any terminal using `uv run artemis restart`, `uv run artemis stop`, and `uv run artemis status`;
+* **Web Visual Test Console (`uv run artemis ui`)**: Real-time screen projection and interactive panel. The **Direct** tab works without a model API key and provides pointer-based device control, app launch, key/swipe/text actions, checkpoints, screenshots, Logcat, and Markdown/JSON reports. Completed Direct sessions appear in the normal Workspace history with their evidence and diagnostics. Flash/Pro continue to provide natural-language autonomous runs when model credentials are configured. Manage server lifecycle anytime with `uv run artemis restart`, `uv run artemis stop`, and `uv run artemis status`;
 * **MCP Server**: Connects **Antigravity, Claude Code, Windsurf**, and other MCP clients to real devices for bug reproduction and test execution;
 * **Developer CLI (`uv run artemis run`)**: Direct terminal execution for automated test cases, exploratory stability inspection, or AndroidWorld benchmarks with high-fidelity structured terminal output;
 * **Python SDK**: Integrates as a standard Python library into existing automated testing frameworks (e.g., pytest) or CI/CD pipelines with strongly typed Pydantic structured outputs and assertion support.
@@ -317,6 +333,6 @@ This project is licensed under the [Apache License 2.0](LICENSE).
 
 ### Third-party code
 
-Code not owned by Google lives under [`third_party/`](third_party/), one directory per upstream project, each with its own `LICENSE` and `METADATA`.
+This project includes source code developed by [Minitap, Inc.](https://github.com/minitap-ai/mobile-use). Code not owned by Google lives under [`third_party/`](third_party/), one directory per upstream project, each with its own `LICENSE` and `METADATA`.
 
 - [`third_party/mobile_use`](third_party/mobile_use/) – portions of [mobile-use](https://github.com/minitap-ai/mobile-use) by Minitap, Inc., Apache License 2.0.

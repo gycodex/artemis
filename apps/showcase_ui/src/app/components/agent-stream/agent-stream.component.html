@@ -24,11 +24,11 @@ limitations under the License.
         class="vscode-tab-btn"
         [class.active]="isTaskDropdownOpen()"
         (click)="toggleTaskDropdown($event)"
-        title="Task Queue"
-        aria-label="Task Queue"
+        title="任务队列"
+        aria-label="任务队列"
         >
         <span class="material-symbols-outlined tab-icon">list_alt</span>
-        <span class="tab-label">Task Queue</span>
+        <span class="tab-label">任务队列</span>
       </button>
       <button
         #notesOrigin="cdkOverlayOrigin"
@@ -36,11 +36,11 @@ limitations under the License.
         class="vscode-tab-btn"
         [class.active]="isNotesDropdownOpen()"
         (click)="toggleNotesDropdown($event)"
-        title="Notes & Plans"
-        aria-label="Notes & Plans"
+        title="笔记与计划"
+        aria-label="笔记与计划"
         >
         <span class="material-symbols-outlined tab-icon">description</span>
-        <span class="tab-label">Notes & Plans</span>
+        <span class="tab-label">笔记与计划</span>
       </button>
     </div>
 
@@ -57,15 +57,15 @@ limitations under the License.
       <div class="vscode-dropdown-menu task-dropdown">
         <div class="popover-title-header">
           <span class="material-symbols-outlined">list_alt</span>
-          <span>Task Queue</span>
+          <span>任务队列</span>
         </div>
         <div class="dropdown-section-label">
           <span class="material-symbols-outlined icon-bolt">bolt</span>
-          <span>Active Queue ({{ activeQueue().length }})</span>
+          <span>活动队列（{{ activeQueue().length }}）</span>
         </div>
         @if (activeQueue().length === 0) {
           <div class="dropdown-empty-state">
-            No active or queued tasks
+            暂无运行中或排队中的任务
           </div>
         }
         @for (session of activeQueue(); track trackSession($index, session)) {
@@ -80,11 +80,11 @@ limitations under the License.
                 @if (getTaskStatus(session) === 'running') {
                   <span class="status-dot"></span>
                 }
-                {{ getTaskStatus(session) | uppercase }}
+                {{ taskStatusLabel(getTaskStatus(session)) }}
               </span>
               <div class="item-header-actions">
                 @if (getDeviceSerial(session)) {
-                  <span class="item-device" [title]="'Device: ' + getDeviceSerial(session)">
+                  <span class="item-device" [title]="'设备：' + getDeviceSerial(session)">
                     <span class="material-symbols-outlined device-icon">phone_android</span>
                     <span class="device-name">{{ getDeviceSerial(session) }}</span>
                   </span>
@@ -98,8 +98,8 @@ limitations under the License.
                     type="button"
                     class="btn-stop-card"
                     (click)="stopTask(session.session_id, $event)"
-                    title="Stop this task"
-                    aria-label="Stop this task"
+                    title="停止此任务"
+                    aria-label="停止此任务"
                     >
                     <span class="material-symbols-outlined">stop_circle</span>
                   </button>
@@ -109,8 +109,8 @@ limitations under the License.
                     type="button"
                     class="btn-delete-card"
                     (click)="deleteTask(session.session_id, $event)"
-                    title="Delete this task"
-                    aria-label="Delete this task"
+                    title="删除此任务"
+                    aria-label="删除此任务"
                     >
                     <span class="material-symbols-outlined">delete</span>
                   </button>
@@ -118,21 +118,21 @@ limitations under the License.
               </div>
             </div>
             <div class="item-goal" title="{{ session.initial_goal }}">
-              {{ session.initial_goal || 'Unnamed Task' }}
+              {{ session.initial_goal || '未命名任务' }}
             </div>
             <div class="item-footer">
-              <span class="item-id" [title]="session.session_id">ID: {{ session.session_id }}</span>
+              <span class="item-id" [title]="session.session_id">编号：{{ session.session_id }}</span>
               <span class="item-date">{{ session.start_time * 1000 | date:'MM/dd/yy' }}</span>
             </div>
           </div>
         }
         <div class="dropdown-section-label history-label">
           <span class="material-symbols-outlined icon-history">history</span>
-          <span>Past Runs & History ({{ historyTasks().length }})</span>
+          <span>历史任务（{{ historyTasks().length }}）</span>
         </div>
         @if (historyTasks().length === 0) {
           <div class="dropdown-empty-state">
-            No past task history
+            暂无历史任务
           </div>
         }
         <div class="dropdown-history-list">
@@ -148,11 +148,11 @@ limitations under the License.
                   @if (getTaskStatus(session) === 'running') {
                     <span class="status-dot"></span>
                   }
-                  {{ getTaskStatus(session) | uppercase }}
+                  {{ taskStatusLabel(getTaskStatus(session)) }}
                 </span>
                 <div class="item-header-actions">
                   @if (getDeviceSerial(session)) {
-                    <span class="item-device" [title]="'Device: ' + getDeviceSerial(session)">
+                    <span class="item-device" [title]="'设备：' + getDeviceSerial(session)">
                       <span class="material-symbols-outlined device-icon">phone_android</span>
                       <span class="device-name">{{ getDeviceSerial(session) }}</span>
                     </span>
@@ -166,8 +166,8 @@ limitations under the License.
                       type="button"
                       class="btn-delete-card"
                       (click)="deleteTask(session.session_id, $event)"
-                      title="Delete this task"
-                      aria-label="Delete this task"
+                      title="删除此任务"
+                      aria-label="删除此任务"
                       >
                       <span class="material-symbols-outlined">delete</span>
                     </button>
@@ -175,10 +175,10 @@ limitations under the License.
                 </div>
               </div>
               <div class="item-goal" title="{{ session.initial_goal }}">
-                {{ session.initial_goal || 'Unnamed Task' }}
+                {{ session.initial_goal || '未命名任务' }}
               </div>
               <div class="item-footer">
-                <span class="item-id" [title]="session.session_id">ID: {{ session.session_id }}</span>
+                <span class="item-id" [title]="session.session_id">编号：{{ session.session_id }}</span>
                 <span class="item-date">{{ session.start_time * 1000 | date:'MM/dd/yy' }}</span>
               </div>
             </div>
@@ -200,7 +200,7 @@ limitations under the License.
       <div class="vscode-dropdown-menu notes-dropdown">
         <div class="popover-title-header">
           <span class="material-symbols-outlined">description</span>
-          <span>Notes & Plans</span>
+          <span>笔记与计划</span>
         </div>
         <!-- Notes Selector / Pills (Shown if there are note files) -->
         @if (noteKeys().length > 1) {
@@ -222,7 +222,7 @@ limitations under the License.
         @if (noteKeys().length === 0) {
           <div class="dropdown-empty-state">
             <span class="material-symbols-outlined empty-icon">description</span>
-            <span>No notes available for this session.</span>
+            <span>当前会话暂无笔记。</span>
           </div>
         }
         <!-- Rich Notes Content Viewer -->
@@ -554,11 +554,86 @@ limitations under the License.
     @if (agentService.isSessionContentLoading()) {
       <div class="session-loading-state" aria-live="polite">
         <span class="material-symbols-outlined spin-animation">progress_activity</span>
-        <span>Loading run history...</span>
+        <span>正在加载运行记录...</span>
       </div>
     }
 
-    @if (!agentService.isSessionContentLoading() && consolidatedBlocks().length === 0 && !showPlanningLoader() && startupWorkItems().length === 0) {
+    @if (!agentService.isSessionContentLoading() && isDirectSession() && directArtifacts(); as artifacts) {
+      <section class="direct-history-card">
+        <div class="direct-history-heading">
+          <div>
+            <span class="direct-mode-label">ARTEMIS 直连模式</span>
+            <h3>{{ artifacts.state.name || '移动端直连测试' }}</h3>
+          </div>
+          <span class="direct-status" [class.failed]="isDirectFailure(artifacts.state.status || artifacts.status)">
+            {{ directStatusLabel(artifacts.state.status || artifacts.status) }}
+          </span>
+        </div>
+        <div
+          class="direct-summary direct-markdown"
+          [innerHTML]="renderMarkdown(localizeDirectDisplayText(artifacts.state.summary || '暂无测试摘要。'), 'direct-summary-' + artifacts.session_id)">
+        </div>
+        <div class="direct-metrics">
+          <span><strong>{{ artifacts.state.actions?.length || 0 }}</strong> 次操作</span>
+          <span><strong>{{ artifacts.state.observations?.length || 0 }}</strong> 次观察</span>
+          <span><strong>{{ artifacts.state.checkpoints?.length || 0 }}</strong> 个检查点</span>
+          <span><strong>{{ artifacts.screenshots.length }}</strong> 张截图</span>
+        </div>
+
+        @if (artifacts.state.checkpoints?.length) {
+          <div class="direct-section">
+            <h4>检查点</h4>
+            @for (checkpoint of artifacts.state.checkpoints; track checkpoint.index) {
+              <div class="direct-checkpoint" [class.failed]="!checkpoint.passed">
+                <span class="material-symbols-outlined">{{ checkpoint.passed ? 'check_circle' : 'cancel' }}</span>
+                <div class="direct-checkpoint-content">
+                  <div
+                    class="direct-checkpoint-title direct-markdown"
+                    [innerHTML]="renderMarkdown(localizeDirectDisplayText(checkpoint.name || '未命名检查点'), 'direct-checkpoint-name-' + artifacts.session_id + '-' + checkpoint.index)">
+                  </div>
+                  <div
+                    class="direct-checkpoint-details direct-markdown"
+                    [innerHTML]="renderMarkdown(localizeDirectDisplayText(checkpoint.details || '暂无说明。'), 'direct-checkpoint-details-' + artifacts.session_id + '-' + checkpoint.index)">
+                  </div>
+                </div>
+              </div>
+            }
+          </div>
+        }
+
+        @if (artifacts.screenshots.length) {
+          <div class="direct-section">
+            <h4>过程截图</h4>
+            <div class="direct-screenshot-grid">
+              @for (shot of artifacts.screenshots; track shot.url) {
+                <a [href]="shot.url" target="_blank" rel="noopener">
+                  <img [src]="shot.url" [alt]="'测试截图 ' + ($index + 1)">
+                  <span>测试截图 {{ $index + 1 }}</span>
+                </a>
+              }
+            </div>
+          </div>
+        }
+
+        @if (artifacts.report) {
+          <details class="direct-section">
+            <summary>查看完整报告</summary>
+            <div
+              class="direct-report direct-markdown"
+              [innerHTML]="renderMarkdown(directReportMarkdown(), 'direct-report-' + artifacts.session_id)">
+            </div>
+          </details>
+        }
+        @if (artifacts.logcat_tail) {
+          <details class="direct-section">
+            <summary>查看系统日志</summary>
+            <pre class="logcat">{{ artifacts.logcat_tail }}</pre>
+          </details>
+        }
+      </section>
+    }
+
+    @if (!agentService.isSessionContentLoading() && !isDirectSession() && consolidatedBlocks().length === 0 && !showPlanningLoader() && startupWorkItems().length === 0) {
       <div class="empty-state">
         <div class="empty-icon"><span class="material-symbols-outlined">sensors</span></div>
         <h3>No Stream Activity Selected</h3>

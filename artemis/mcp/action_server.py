@@ -31,6 +31,7 @@ Exceptions raised by the actuator are wrapped here with the historical
 """
 
 import asyncio
+from collections.abc import Awaitable, Callable
 from typing import Annotated, Any
 
 from mcp.server.fastmcp import FastMCP
@@ -66,7 +67,18 @@ def _wrap_exception(action: str, exc: Exception) -> CallToolResult:
     )
 
 
-def build_action_server(actuator: Actuator, name: str = "artemis_actions") -> FastMCP:
+def build_action_server(
+    actuator: Actuator,
+    name: str = "artemis_actions",
+    after_action: Callable[
+        [str, dict[str, Any], ActionResult, CallToolResult], Awaitable[CallToolResult]
+    ]
+    | None = None,
+    after_observe: Callable[
+        [ObserveResult, bytes | None, CallToolResult], Awaitable[CallToolResult]
+    ]
+    | None = None,
+) -> FastMCP:
     """Builds a FastMCP server exposing exactly what ``actuator`` implements.
 
     Raises ``ActuatorContractError`` when the actuator violates the manifest, so a
@@ -84,7 +96,15 @@ def build_action_server(actuator: Actuator, name: str = "artemis_actions") -> Fa
     for spec in wire_dialects():
         if spec.name in caps:
             mcp.add_tool(
-                make_wire_handler(spec, actuator, _wrap, _wrap_exception),
+                make_wire_handler(
+                    spec,
+                    actuator,
+                    _wrap,
+                    _wrap_exception,
+                    after_action=after_action,
+                ),
+                # Keep the canonical typed signature while allowing host-driven
+                # sessions to append an observation and persist the step.
                 name=spec.name,
                 description=spec.wire.description,
             )
@@ -115,11 +135,14 @@ def build_action_server(actuator: Actuator, name: str = "artemis_actions") -> Fa
                             mimeType="image/jpeg",
                         )
                     )
-                return CallToolResult(
+                wrapped = CallToolResult(
                     content=content,
                     structuredContent=obs.model_dump(mode="json"),
                     isError=False,
                 )
+                if after_observe is not None:
+                    return await after_observe(obs, img_bytes, wrapped)
+                return wrapped
             except Exception as e:
                 obs = ObserveResult(
                     ok=False,
@@ -145,7 +168,7 @@ def build_action_server(actuator: Actuator, name: str = "artemis_actions") -> Fa
 
         @mcp.tool()
         async def take_screenshot(timeout_ms: int | None = None) -> CallToolResult:
-            """Return the current screen as base64 (adapter-internal, no persistence)."""
+            """Return the current screen as an MCP image (no persistence)."""
             try:
                 coro = actuator.take_screenshot()
                 if timeout_ms:
@@ -156,10 +179,15 @@ def build_action_server(actuator: Actuator, name: str = "artemis_actions") -> Fa
                 payload = {"ok": False, "error": f"screenshot timed out after {timeout_ms}ms"}
             except Exception as e:
                 payload = {"ok": False, "error": str(e)}
+            content: list[Any] = [
+                TextContent(type="text", text="screenshot" if payload["ok"] else str(payload))
+            ]
+            if payload["ok"]:
+                content.append(
+                    ImageContent(type="image", data=payload["image_b64"], mimeType="image/jpeg")
+                )
             return CallToolResult(
-                content=[
-                    TextContent(type="text", text="screenshot" if payload["ok"] else str(payload))
-                ],
+                content=content,
                 structuredContent=payload,
                 isError=False,
             )

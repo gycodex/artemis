@@ -345,6 +345,7 @@ export class HomeComponent implements OnInit, OnDestroy {
 
   // Computed helper states delegating to SystemService
   public isReady = computed(() => this.systemService.isReady());
+  public isDirectReady = computed(() => this.systemService.isDirectReady());
   public hasReadinessReport = computed(() => this.systemService.hasReadinessReport());
   public isLoading = computed(() => this.systemService.isLoading());
   public isRestartingAdb = computed(() => this.systemService.isRestartingAdb());
@@ -565,6 +566,10 @@ export class HomeComponent implements OnInit, OnDestroy {
       this.systemService.fetchReadiness().subscribe();
       this.systemService.fetchModelConfigEnv().subscribe();
     }
+  }
+
+  public openDirectControl(): void {
+    void this.router.navigate(['/direct']);
   }
 
   public setSelectedOs(os: 'linux' | 'darwin' | 'windows'): void {

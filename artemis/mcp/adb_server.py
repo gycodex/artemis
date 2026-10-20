@@ -17,6 +17,7 @@ import json
 import logging
 import os
 from pathlib import Path
+import re
 import sys
 import textwrap
 from typing import Any
@@ -115,6 +116,23 @@ _GLOBAL_CONTROLLER = None
 _CONTROLLERS: dict[str, Any] = {}
 
 
+def _restore_configured_tcp_device(adb: AdbClient, target_serial: str | None, devices: list):
+    """Reconnect an explicitly configured TCP device after an ADB daemon restart."""
+    if (
+        not target_serial
+        or any(device.serial == target_serial for device in devices)
+        or not re.fullmatch(r"(?:\[[0-9A-Fa-f:]+\]|[^:\s]+):\d+", target_serial)
+    ):
+        return devices
+    try:
+        response = adb.connect(target_serial, timeout=3.0)
+        logger.info("ADB reconnect for %s: %s", target_serial, response)
+        return adb.device_list()
+    except Exception as exc:
+        logger.warning("ADB reconnect for %s failed: %s", target_serial, exc)
+        return devices
+
+
 def _get_controller(device_serial: str | None = None):
     """Lazy-load device controller on-demand, caching per device serial."""
     global _GLOBAL_CONTROLLER, _CONTROLLERS
@@ -155,6 +173,10 @@ def _get_controller(device_serial: str | None = None):
     adb = AdbClient(host=host, port=port)
 
     devices = adb.device_list()
+    # TCP emulators disappear from `adb devices` whenever the local ADB daemon
+    # is restarted. A configured serial is explicit authorization to restore
+    # that transport; this does not start or modify the emulator.
+    devices = _restore_configured_tcp_device(adb, target_serial, devices)
     if not devices:
         raise Exception(f"No Android devices found at {host}:{port}")
 

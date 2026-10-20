@@ -77,21 +77,32 @@ try:
     from admin_console.database.repositories.session_repository import session_repo
     from admin_console.database.repositories.step_repository import step_repo
     from admin_console.database.repositories.trace_repository import trace_repo
-    from admin_console.routers import media, replay, sessions, steps, stream, system, tasks
+    from admin_console.routers import direct, media, replay, sessions, steps, stream, system, tasks
     from admin_console.routers.replay import replay_manager
     from admin_console.services.ipc_service import ipc_service
     from admin_console.services.media_service import media_service
     from admin_console.services.model_service import model_service
     from admin_console.services.task_queue_service import task_queue_service
+    from admin_console.services.direct_control_service import direct_control_service
 except ImportError:
     from apps.admin_console.core.security import SameOriginBoundaryMiddleware
     from apps.admin_console.core.state import state
     from apps.admin_console.database.repositories.session_repository import session_repo
-    from apps.admin_console.routers import media, replay, sessions, steps, stream, system, tasks
+    from apps.admin_console.routers import (
+        direct,
+        media,
+        replay,
+        sessions,
+        steps,
+        stream,
+        system,
+        tasks,
+    )
     from apps.admin_console.routers.replay import replay_manager
     from apps.admin_console.services.ipc_service import ipc_service
     from apps.admin_console.services.model_service import model_service
     from apps.admin_console.services.task_queue_service import task_queue_service
+    from apps.admin_console.services.direct_control_service import direct_control_service
 
 # Initialize language server synchronization address
 init_ls_address()
@@ -208,6 +219,7 @@ async def on_shutdown():
         session_repo.update_session_status(session_id, "cancelled")
 
     await ipc_service.stop_server()
+    await direct_control_service.close()
     state.ipc_subscribers.clear()
     await asyncio.to_thread(shutdown_awake_service)
     clear_server_info(
@@ -224,6 +236,7 @@ app.include_router(steps.router)
 app.include_router(tasks.router)
 app.include_router(replay.router)
 app.include_router(system.router)
+app.include_router(direct.router)
 
 # Mount cloud gateway router for Frappe / Cloud integration if present
 try:

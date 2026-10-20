@@ -115,11 +115,33 @@ cd artemis
 
 ARTEMIS 内置原生 **Model Context Protocol (MCP)** 服务。只需将以下配置加入你的 IDE 配置文件中，即可在编写代码时直接驱动真机：
 
+ARTEMIS 提供两种 MCP 模式：
+
+| 模式 | 由谁进行界面推理 | 额外模型凭证 | 适用场景 |
+| :--- | :--- | :--- | :--- |
+| **Direct**（Codex / Claude Code 推荐） | 当前 MCP 宿主 | **不需要** | 让宿主直接查看截图、操作设备并读取 Logcat |
+| **Agent**（默认，向后兼容） | ARTEMIS Flash / Pro | 云模型 API Key 或本地兼容模型地址 | 后台自主任务、检查点、完整轨迹和长时间监控 |
+
+Direct 模式不会读取或复用宿主的登录令牌，而是直接省去第二个模型：Codex、Claude Code 或其他支持多模态的 MCP 客户端负责推理，ARTEMIS 只提供类型明确的设备工具。
+
+Direct 模式会先完成 MCP 握手，再连接 Android；在 Codex 中默认安装为非必需服务。因此即使模拟器离线，也不会阻止 Codex 加载聊天记录，设备错误只会在调用设备工具时返回。
+
+在 Direct 模式下，宿主通常先调用 `observe_screen(include_image=true)`，再选择动作并调用 `click` 等采用 0–1000 归一化坐标的工具，随后重新观察以验证结果。会话中的显式观察会自动归档为证据，完成后的 MCP 会话会与 Web Direct 一样进入 Workspace 历史；配置为 `127.0.0.1:7555` 等 TCP 模拟器序列号时，本地 ADB 重启后还会自动恢复连接。`read_logcat` 提供有行数上限、只读的诊断快照。
+
+对于多步骤验证，Direct 模式还提供无需额外模型的会话层：先调用 `session_start`，照常使用设备工具，通过 `session_checkpoint` 记录由宿主判断的断言，最后调用 `session_finish`。会话期间会记录设备动作，并可在每次动作后自动返回和保存观察结果；结束时会在 Artemis 的 traces 目录生成 `report.md`、`session.json`、截图以及可选的有界 `logcat.txt`。这样可以获得接近 Agent 模式的证据链和报告，但仍只由 Codex 或 Claude Code 负责推理。
+
 ### 1. 一键自动安装到 IDE（推荐）
 
 运行 `./start.sh`（macOS/Linux）或 `.\start.bat`（Windows PowerShell）启动脚本时，会主动询问是否自动挂载全局 MCP 与测试行为准则（支持跳过并在之后随时手动执行以下命令挂载）：
 
 ```bash
+# 推荐：无需单独配置 ARTEMIS 模型 API Key
+uv run artemis mcp --type direct --install codex
+uv run artemis mcp --type direct --install claude
+
+# 同时连接多台设备时，按 serial 绑定设备
+uv run artemis mcp --type direct --device emulator-5554 --install codex
+
 # 一键安装全局 MCP 服务与 Rules 到 Antigravity / Jetski：
 uv run artemis mcp --install antigravity
 
@@ -132,13 +154,13 @@ uv run artemis mcp --install all
 
 ### 2. 手动配置（可选）
 
-如果你习惯手动复制配置，可运行 `uv run artemis mcp --generate-config <client>`（例如 `codex` 或 `antigravity`）获取对应的 TOML 或 JSON 配置。请将 `command` 填写为项目下 `.venv` 虚拟环境中的 Python 绝对路径，并将 `/path/to/artemis` 替换为项目实际路径：
+如果你习惯手动复制配置，可运行 `uv run artemis mcp --type direct --generate-config <client>`（例如 `codex` 或 `claude`）获取对应的 TOML 或 JSON 配置。省略 `--type direct` 即生成自主 Agent 模式配置。请将 `command` 填写为项目下 `.venv` 虚拟环境中的 Python 绝对路径，并将 `/path/to/artemis` 替换为项目实际路径：
 
 * **Codex** (`~/.codex/config.toml`)：
 ```toml
 [mcp_servers.artemis]
 command = "/path/to/artemis/.venv/bin/python"
-args = ["-m", "mcp_server"]
+args = ["-m", "artemis", "mcp", "--type", "direct"]
 cwd = "/path/to/artemis"
 
 [mcp_servers.artemis.env]
@@ -152,18 +174,12 @@ PYTHONPATH = "/path/to/artemis"
   "mcpServers": {
     "artemis": {
       "command": "/path/to/artemis/.venv/bin/python",
-      "args": ["-m", "mcp_server"],
+      "args": ["-m", "artemis", "mcp", "--type", "direct"],
       "cwd": "/path/to/artemis",
       "env": {
         "PYTHONUNBUFFERED": "1"
       },
-      "tools": {
-        "mobile_run_task": { "eager": true },
-        "mobile_manage_task": { "eager": true },
-        "mobile_get_device_state": { "eager": true },
-        "mobile_inspect_trace": { "eager": true },
-        "mobile_diagnose": { "eager": true }
-      }
+      "disabledTools": []
     }
   }
 }
@@ -175,7 +191,7 @@ PYTHONPATH = "/path/to/artemis"
   "mcpServers": {
     "artemis": {
       "command": "/path/to/artemis/.venv/bin/python",
-      "args": ["-m", "mcp_server"],
+      "args": ["-m", "artemis", "mcp", "--type", "direct"],
       "cwd": "/path/to/artemis"
     }
   }
@@ -247,7 +263,7 @@ if __name__ == "__main__":
   <sub><b>控制台功能概览</b>：<b>① 视图切换</b>（主页与工作区） · <b>② 运行模式与回放</b>（Flash/Pro 状态与视频回放） · <b>③ 实时感知推理流</b>（动作感知、目标坐标与结构化总结） · <b>④ 提示词输入坞 (Prompt Dock)</b>（自然语言下发） · <b>⑤ 任务队列看板</b>（生命周期与历史回溯）</sub>
 </p>
 
-* **Web 可视化测试控制台 (`uv run artemis ui`)**：集成设备实时投屏与交互面板，支持通过自然语言下发测试用例，实时观测推理步骤、操作轨迹、截图留存与异常状态回放；支持在任意终端使用 `uv run artemis restart`、`uv run artemis stop`、`uv run artemis status` 一键重启、关停或查看服务状态；
+* **Web 可视化测试控制台 (`uv run artemis ui`)**：集成设备实时投屏与交互面板。新增的 **Direct** 标签无需模型 API Key，可通过投屏点击、启动应用、按键、滑动和文本输入控制设备，并记录检查点、截图、Logcat 及 Markdown/JSON 报告；完成后的 Direct 会话会进入统一的 Workspace 历史，可直接查看证据与诊断信息。配置模型凭证后仍可使用 Flash/Pro 自然语言自主任务。支持通过 `uv run artemis restart`、`uv run artemis stop`、`uv run artemis status` 管理服务；
 * **原生 MCP 协议 (IDE 协同)**：作为标准 MCP 服务器接入 **Antigravity、Claude Code、Windsurf** 等开发环境，在 IDE 中直接驱动真机完成自动化测试与 Bug 复现验证；
 * **开发者命令行 CLI (`uv run artemis run`)**：支持通过终端直接执行自动化测试用例、探索性稳定性巡检或 AndroidWorld 基准评测，提供高保真结构化终端输出；
 * **Python SDK**：作为标准 Python 库集成至现有自动化测试框架（如 pytest）或 CI/CD 流水线，提供基于 Pydantic 的强类型结构化结果与断言支持。

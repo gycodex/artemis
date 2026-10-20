@@ -44,6 +44,27 @@ export interface Session {
   device_serial?: string | null;
   device_id?: string | null;
   device_info?: any;
+  profile?: string | null;
+  direct_artifacts?: {
+    report_path?: string | null;
+    json_path?: string | null;
+  } | null;
+}
+
+export interface DirectSessionArtifacts {
+  session_id: string;
+  status?: string;
+  state: {
+    name?: string;
+    summary?: string;
+    status?: string;
+    actions?: any[];
+    observations?: any[];
+    checkpoints?: any[];
+  };
+  report: string;
+  logcat_tail: string;
+  screenshots: { name: string; url: string }[];
 }
 
 export interface AgentStatusResponse {

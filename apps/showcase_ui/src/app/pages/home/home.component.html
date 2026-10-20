@@ -1694,6 +1694,22 @@
               <span class="material-symbols-outlined rocket-icon">rocket_launch</span>
             </button>
           </div>
+        } @else if (isDirectReady()) {
+          <div class="ready-banner-footer direct-ready-footer">
+            <div class="ready-banner-left">
+              <div class="step-badge step-pass">
+                <span class="material-symbols-outlined step-check-icon">phonelink_setup</span>
+              </div>
+              <div class="ready-text-group">
+                <h4 class="ready-title">Device Ready for Direct Testing</h4>
+                <p class="ready-desc">No model API key is required. Codex or Claude Code can drive the test loop through Direct tools.</p>
+              </div>
+            </div>
+            <button type="button" class="btn-proceed-launch" (click)="openDirectControl()">
+              <span>Open Direct Control</span>
+              <span class="material-symbols-outlined rocket-icon">arrow_forward</span>
+            </button>
+          </div>
         }
 
       </section>
@@ -1706,7 +1722,13 @@
       <section class="task-launcher-view">
 
         <!-- Prerequisites Drop Alert if any blocker probe is not passing -->
-        @if (hasReadinessReport() && !isReady()) {
+        @if (hasReadinessReport() && !isReady() && isDirectReady()) {
+          <div class="launcher-warning-bar direct-ready-bar" (click)="openDirectControl()">
+            <span class="material-symbols-outlined warn-icon">check_circle</span>
+            <span>Direct testing is ready without a model API key. Flash and Pro still require model credentials.</span>
+            <span class="material-symbols-outlined arrow">arrow_forward</span>
+          </div>
+        } @else if (hasReadinessReport() && !isReady()) {
           <div class="launcher-warning-bar" (click)="setTab('diagnostics')">
             <span class="material-symbols-outlined warn-icon">{{ adbProbe()?.summary === 'Device Locked' ? 'lock' : 'warning' }}</span>
             <span>

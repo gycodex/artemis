@@ -102,6 +102,9 @@ export class SystemService {
   public isReady = computed(() => {
     return this.isEnvironmentReady() && this.isCredentialsReady() && this.isDeviceReady();
   });
+  public isDirectReady = computed(() => {
+    return this.isEnvironmentReady() && this.isDeviceReady();
+  });
   public blockerCount = computed(() => this.totalStepCount());
   public passedBlockerCount = computed(() => this.passedStepCount());
   public probes = computed(() => this.readinessReport()?.probes ?? []);

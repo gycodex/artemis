@@ -1397,7 +1397,7 @@
     }
   },
   "take_screenshot": {
-    "description": "Return the current screen as base64 (adapter-internal, no persistence).",
+    "description": "Return the current screen as an MCP image (no persistence).",
     "inputSchema": {
       "properties": {
         "timeout_ms": {

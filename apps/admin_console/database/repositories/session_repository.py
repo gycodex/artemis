@@ -15,6 +15,8 @@
 import json
 import logging
 import os
+from datetime import datetime
+from pathlib import Path
 import sqlite3
 import time
 from typing import Any
@@ -68,6 +70,145 @@ class SessionRepository:
             cursor = conn.cursor()
             cursor.execute("SELECT * FROM sessions ORDER BY start_time DESC")
             return [_canonicalize_status(dict(r)) for r in cursor.fetchall()]
+
+    def create_direct_session(
+        self,
+        session_id: str,
+        name: str,
+        device_serial: str,
+        package_name: str | None,
+        output_dir: str,
+        auto_observe: bool,
+    ) -> None:
+        """Persist a host-driven Direct run alongside autonomous sessions."""
+        device_info = {
+            "profile": "direct",
+            "device_id": device_serial,
+            "device_serial": device_serial,
+            "package_name": package_name,
+            "output_dir": output_dir,
+            "ingress": "web-direct",
+            "auto_observe": bool(auto_observe),
+        }
+        with db_session(self.db_path) as conn:
+            conn.execute(
+                "INSERT OR REPLACE INTO sessions "
+                "(session_id, initial_goal, start_time, end_time, status, device_info, pid, video_filepath) "
+                "VALUES (?, ?, ?, NULL, 'running', ?, ?, NULL)",
+                (
+                    str(session_id),
+                    name,
+                    time.time(),
+                    json.dumps(device_info),
+                    os.getpid(),
+                ),
+            )
+            conn.commit()
+
+    def sync_direct_sessions(self, traces_path: str | Path) -> int:
+        """Backfill finalized Direct artifact folders created by older MCP hosts."""
+        root = Path(traces_path)
+        if not root.is_dir():
+            return 0
+        with db_session(self.db_path) as conn:
+            existing = {
+                str(row[0]) for row in conn.execute("SELECT session_id FROM sessions").fetchall()
+            }
+            imported = 0
+            for state_path in root.glob("direct-*/session.json"):
+                session_id = state_path.parent.name
+                if session_id in existing:
+                    continue
+                try:
+                    state = json.loads(state_path.read_text(encoding="utf-8"))
+                except (OSError, ValueError):
+                    continue
+                if not isinstance(state, dict) or state.get("session_id") != session_id:
+                    continue
+                direct_status = str(state.get("status") or "running").lower()
+                if direct_status == "running":
+                    continue
+                status = {
+                    "passed": "completed",
+                    "failed": "failed",
+                    "aborted": "cancelled",
+                }.get(direct_status, "failed")
+                started_at = state.get("started_at_epoch")
+                if not isinstance(started_at, (int, float)):
+                    try:
+                        started_at = datetime.fromisoformat(str(state["started_at"])).timestamp()
+                    except (KeyError, TypeError, ValueError):
+                        started_at = state_path.stat().st_mtime
+                device_serial = state.get("device_serial")
+                output_dir = str(state_path.parent.resolve())
+                device_info = {
+                    "profile": "direct",
+                    "device_id": device_serial,
+                    "device_serial": device_serial,
+                    "package_name": state.get("package_name"),
+                    "output_dir": output_dir,
+                    "ingress": state.get("ingress") or "mcp-direct",
+                    "auto_observe": bool(state.get("auto_observe", True)),
+                    "direct_status": direct_status,
+                    "artifacts": {
+                        "report_path": str(state_path.parent / "report.md"),
+                        "json_path": str(state_path),
+                    },
+                }
+                conn.execute(
+                    "INSERT OR IGNORE INTO sessions "
+                    "(session_id, initial_goal, start_time, end_time, status, device_info, pid, video_filepath) "
+                    "VALUES (?, ?, ?, ?, ?, ?, NULL, NULL)",
+                    (
+                        session_id,
+                        str(state.get("name") or "Direct mobile test"),
+                        float(started_at),
+                        state_path.stat().st_mtime,
+                        status,
+                        json.dumps(device_info),
+                    ),
+                )
+                if conn.total_changes > imported:
+                    imported += 1
+                    existing.add(session_id)
+            conn.commit()
+            return imported
+
+    def finish_direct_session(
+        self,
+        session_id: str,
+        direct_status: str,
+        report_path: str | None = None,
+        json_path: str | None = None,
+    ) -> bool:
+        """Finalize a Direct run and attach its generated artifacts."""
+        canonical_status = {
+            "passed": "completed",
+            "failed": "failed",
+            "aborted": "cancelled",
+        }.get(str(direct_status).lower(), "failed")
+        with db_session(self.db_path) as conn:
+            row = conn.execute(
+                "SELECT device_info FROM sessions WHERE session_id = ?", (str(session_id),)
+            ).fetchone()
+            if row is None:
+                return False
+            try:
+                device_info = json.loads(row["device_info"] or "{}")
+            except (TypeError, ValueError):
+                device_info = {}
+            device_info["direct_status"] = direct_status
+            device_info["artifacts"] = {
+                "report_path": report_path,
+                "json_path": json_path,
+            }
+            cursor = conn.execute(
+                "UPDATE sessions SET status = ?, end_time = ?, device_info = ?, pid = NULL "
+                "WHERE session_id = ?",
+                (canonical_status, time.time(), json.dumps(device_info), str(session_id)),
+            )
+            conn.commit()
+            return cursor.rowcount > 0
 
     def get_video_recordings_map(self) -> dict[str, str]:
         with db_session(self.db_path) as conn:

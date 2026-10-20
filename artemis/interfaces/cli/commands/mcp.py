@@ -36,7 +36,7 @@ import typer
 logger = get_logger(__name__)
 console = Console()
 
-ARTEMIS_MCP_TOOLS = (
+ARTEMIS_AGENT_MCP_TOOLS = (
     "mobile_run_task",
     "mobile_manage_task",
     "mobile_get_device_state",
@@ -44,10 +44,46 @@ ARTEMIS_MCP_TOOLS = (
     "mobile_diagnose",
 )
 
+ARTEMIS_DIRECT_MCP_TOOLS = (
+    "click",
+    "click_sequence",
+    "long_press",
+    "input_text",
+    "swipe",
+    "press_key",
+    "manage_app",
+    "wait_for_delay",
+    "wait_for_text",
+    "open_link",
+    "erase_one_char",
+    "focus_and_clear_text",
+    "observe_screen",
+    "take_screenshot",
+    "get_ui_hierarchy",
+    "list_devices",
+    "get_device_info",
+    "read_logcat",
+    "session_start",
+    "session_checkpoint",
+    "session_status",
+    "session_finish",
+)
 
-def _eager_tools_config() -> dict[str, dict[str, bool]]:
+# Backwards-compatible import for integrations that used the old constant.
+ARTEMIS_MCP_TOOLS = ARTEMIS_AGENT_MCP_TOOLS
+
+
+def _tools_for_server_type(server_type: str) -> tuple[str, ...]:
+    return (
+        ARTEMIS_DIRECT_MCP_TOOLS
+        if server_type.lower() in ("direct", "host")
+        else ARTEMIS_AGENT_MCP_TOOLS
+    )
+
+
+def _eager_tools_config(server_type: str = "agent") -> dict[str, dict[str, bool]]:
     """Return the eager-loading extension used by clients that support it."""
-    return {tool_name: {"eager": True} for tool_name in ARTEMIS_MCP_TOOLS}
+    return {tool_name: {"eager": True} for tool_name in _tools_for_server_type(server_type)}
 
 
 def _get_vscode_user_dir() -> Path:
@@ -61,16 +97,27 @@ def _get_vscode_user_dir() -> Path:
         return Path.home() / ".config" / "Code" / "User"
 
 
-def _get_config_snippet(client: str, python_exe: str, project_root: str) -> dict:
+def _get_config_snippet(
+    client: str,
+    python_exe: str,
+    project_root: str,
+    server_type: str = "agent",
+    device_serial: str | None = None,
+) -> dict:
     """Generates MCP configuration dictionary for the specified client."""
+    direct_mode = server_type.lower() in ("direct", "host")
+    args = ["-m", "artemis", "mcp", "--type", "direct"] if direct_mode else ["-m", "mcp_server"]
+    server_env = {
+        "PYTHONUNBUFFERED": "1",
+        "PYTHONPATH": project_root,
+        "ARTEMIS_DESKTOP_NOTIFY": "true",
+    }
+    if device_serial:
+        server_env["ARTEMIS_DEVICE_ID"] = device_serial
     config_body = {
         "command": python_exe,
-        "args": ["-m", "mcp_server"],
-        "env": {
-            "PYTHONUNBUFFERED": "1",
-            "PYTHONPATH": project_root,
-            "ARTEMIS_DESKTOP_NOTIFY": "true",
-        },
+        "args": args,
+        "env": server_env,
     }
     config_with_cwd = {**config_body, "cwd": project_root}
 
@@ -95,7 +142,7 @@ def _get_config_snippet(client: str, python_exe: str, project_root: str) -> dict
                     # Retain the legacy Jetski eager extension only in its
                     # legacy config file. Current Antigravity gets the strict,
                     # documented configuration above as a safe fallback.
-                    "tools": _eager_tools_config(),
+                    "tools": _eager_tools_config(server_type),
                 }
             }
         }
@@ -122,9 +169,11 @@ def _get_config_snippet(client: str, python_exe: str, project_root: str) -> dict
                     # registered. The host may still present schemas through
                     # tool search to control context size.
                     "enabled": True,
-                    "required": True,
+                    # Direct mode must never prevent the host from loading chats
+                    # merely because a test device or checkout is unavailable.
+                    "required": not direct_mode,
                     "startup_timeout_sec": 120,
-                    "enabled_tools": list(ARTEMIS_MCP_TOOLS),
+                    "enabled_tools": list(_tools_for_server_type(server_type)),
                 }
             }
         }
@@ -296,7 +345,10 @@ def _merge_codex_toml(file_path: Path, server_config: dict) -> bool:
             managed_pattern = re.compile(
                 rf"(?ms)^{re.escape(begin_marker)}\n.*?^{re.escape(end_marker)}\n?"
             )
-            updated = managed_pattern.sub(managed_block, existing, count=1)
+            # A callable replacement keeps Windows backslashes literal. Passing
+            # the TOML block directly makes re.sub interpret ``\\`` sequences
+            # in paths as replacement escapes and produces invalid TOML.
+            updated = managed_pattern.sub(lambda _match: managed_block, existing, count=1)
         else:
             # Remove an older, unmanaged Artemis table before adding the managed block.
             kept_lines: list[str] = []
@@ -557,7 +609,13 @@ def install_rules(client: str, project_root: str) -> list[str]:
     return installed_paths
 
 
-def install_mcp_config(client: str, python_exe: str, project_root: str) -> list[str]:
+def install_mcp_config(
+    client: str,
+    python_exe: str,
+    project_root: str,
+    server_type: str = "agent",
+    device_serial: str | None = None,
+) -> list[str]:
     """Auto-installs/merges ARTEMIS MCP configuration and testing rules into IDE config files across any OS."""
     installed_paths: list[str] = []
     targets = (
@@ -577,14 +635,14 @@ def install_mcp_config(client: str, python_exe: str, project_root: str) -> list[
     )
 
     for target in targets:
-        snippet = _get_config_snippet(target, python_exe, project_root)
+        snippet = _get_config_snippet(target, python_exe, project_root, server_type, device_serial)
         if target in ("antigravity", "jetski"):
-            current_server_cfg = _get_config_snippet("antigravity", python_exe, project_root)[
-                "mcpServers"
-            ]["artemis"]
-            legacy_server_cfg = _get_config_snippet("jetski", python_exe, project_root)[
-                "mcpServers"
-            ]["artemis"]
+            current_server_cfg = _get_config_snippet(
+                "antigravity", python_exe, project_root, server_type, device_serial
+            )["mcpServers"]["artemis"]
+            legacy_server_cfg = _get_config_snippet(
+                "jetski", python_exe, project_root, server_type, device_serial
+            )["mcpServers"]["artemis"]
             jetski_path = Path.home() / ".gemini" / "jetski" / "mcp_config.json"
             antigravity_legacy_path = Path.home() / ".gemini" / "antigravity" / "mcp_config.json"
             config_path = Path.home() / ".gemini" / "config" / "mcp_config.json"
@@ -697,9 +755,16 @@ def mcp_command(
         typer.Option(
             "--type",
             "-t",
-            help="Type of MCP server to start: 'agent' (default, universal IDE mobile agent), 'adb' (raw adb), 'xml' (xml fuzzy search).",
+            help="Server type: 'agent' (Artemis runs its own model), 'direct' (the MCP host drives typed device tools; no Artemis model key), 'adb' (legacy raw ADB), or 'xml'.",
         ),
     ] = "agent",
+    device_serial: Annotated[
+        str | None,
+        typer.Option(
+            "--device",
+            help="Bind direct mode to an Android device serial. Otherwise ARTEMIS_DEVICE_ID or the first ready device is used.",
+        ),
+    ] = None,
     transport: Annotated[
         str,
         typer.Option(
@@ -742,6 +807,13 @@ def mcp_command(
     """Launch or configure the ARTEMIS Model Context Protocol (MCP) server."""
     project_root = env_utils.get_project_root()
     python_exe = env_utils.resolve_python_executable(project_root)
+    config_server_type = "direct" if server_type.lower() == "host" else server_type.lower()
+
+    if (install_config or generate_config) and config_server_type not in ("agent", "direct"):
+        console.print(
+            "[bold red]Configuration generation supports --type agent or --type direct.[/bold red]"
+        )
+        raise typer.Exit(1)
 
     if install_config:
         client = install_config.lower()
@@ -765,7 +837,9 @@ def mcp_command(
                 f"[bold red]Unsupported install target: '{install_config}'. Use 'antigravity', 'claude', 'cursor', 'windsurf', 'vscode', 'cline', 'roo', 'openclaw', 'codex', or 'all'.[/bold red]"
             )
             raise typer.Exit(1)
-        installed_paths = install_mcp_config(client, python_exe, project_root)
+        installed_paths = install_mcp_config(
+            client, python_exe, project_root, config_server_type, device_serial
+        )
         console.print(
             "[bold green]✔ Successfully installed ARTEMIS MCP server configuration & rules to:[/bold green]"
         )
@@ -781,41 +855,45 @@ def mcp_command(
         if client == "all":
             all_configs = {
                 "antigravity (~/.gemini/jetski/mcp_config.json)": _get_config_snippet(
-                    "antigravity", python_exe, project_root
+                    "antigravity", python_exe, project_root, config_server_type, device_serial
                 ),
                 "cursor (.cursor/mcp.json)": _get_config_snippet(
-                    "cursor", python_exe, project_root
+                    "cursor", python_exe, project_root, config_server_type, device_serial
                 ),
                 "claude (claude_desktop_config.json & ~/.claude.json)": _get_config_snippet(
-                    "claude", python_exe, project_root
+                    "claude", python_exe, project_root, config_server_type, device_serial
                 ),
                 "windsurf (~/.codeium/windsurf/mcp_config.json)": _get_config_snippet(
-                    "windsurf", python_exe, project_root
+                    "windsurf", python_exe, project_root, config_server_type, device_serial
                 ),
-                "vscode (mcp.json)": _get_config_snippet("vscode", python_exe, project_root),
+                "vscode (mcp.json)": _get_config_snippet(
+                    "vscode", python_exe, project_root, config_server_type, device_serial
+                ),
                 "cline (cline_mcp_settings.json)": _get_config_snippet(
-                    "cline", python_exe, project_root
+                    "cline", python_exe, project_root, config_server_type, device_serial
                 ),
                 "roo (cline_mcp_settings.json)": _get_config_snippet(
-                    "roo", python_exe, project_root
+                    "roo", python_exe, project_root, config_server_type, device_serial
                 ),
                 "openclaw (openclaw.json)": _get_config_snippet(
-                    "openclaw", python_exe, project_root
+                    "openclaw", python_exe, project_root, config_server_type, device_serial
                 ),
                 "codex (~/.codex/config.toml)": _get_config_snippet(
-                    "codex", python_exe, project_root
+                    "codex", python_exe, project_root, config_server_type, device_serial
                 ),
             }
             json_str = json.dumps(all_configs, indent=2)
             syntax_language = "json"
         elif client == "codex":
-            server_cfg = _get_config_snippet("codex", python_exe, project_root)["mcp_servers"][
-                "artemis"
-            ]
+            server_cfg = _get_config_snippet(
+                "codex", python_exe, project_root, config_server_type, device_serial
+            )["mcp_servers"]["artemis"]
             json_str = _codex_toml_block(server_cfg)
             syntax_language = "toml"
         else:
-            snippet = _get_config_snippet(client, python_exe, project_root)
+            snippet = _get_config_snippet(
+                client, python_exe, project_root, config_server_type, device_serial
+            )
             json_str = json.dumps(snippet, indent=2)
             syntax_language = "json"
 
@@ -833,6 +911,20 @@ def mcp_command(
                 agent_mcp.run(transport="sse", host=host, port=port)
             else:
                 agent_mcp.run(transport="stdio")
+        elif st in ("direct", "host"):
+            # Direct mode deliberately initializes no Artemis LLM. The connected
+            # MCP host (Codex, Claude Code, etc.) owns the reasoning loop.
+            from artemis.mcp.adb_server import configure_stdio_mode
+            from artemis.mcp.direct_server import build_direct_adb_server
+
+            if transport.lower() != "sse":
+                configure_stdio_mode()
+            direct_mcp = build_direct_adb_server(device_serial)
+            logger.info(f"Starting Artemis direct device MCP Server over {transport}...")
+            if transport.lower() == "sse":
+                direct_mcp.run(transport="sse", host=host, port=port)
+            else:
+                direct_mcp.run(transport="stdio")
         elif st == "adb":
             if transport.lower() == "sse":
                 logger.info(f"Starting Artemis ADB MCP Server over {transport}...")
@@ -855,7 +947,7 @@ def mcp_command(
                 xml_mcp.run(transport="stdio")
         else:
             logger.error(
-                f"Unsupported MCP server type: {server_type}. Use 'agent', 'adb', or 'xml'."
+                f"Unsupported MCP server type: {server_type}. Use 'agent', 'direct', 'adb', or 'xml'."
             )
             raise typer.Exit(1)
     finally:

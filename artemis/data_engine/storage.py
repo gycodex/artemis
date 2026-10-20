@@ -1140,7 +1140,7 @@ class StorageManager:
         except ValueError:
             return False
 
-    def delete_session(self, session_id: UUID):
+    def delete_session(self, session_id: UUID | str):
         """Delete all data associated with a session, including files on disk."""
         session_id_str = str(session_id)
 

@@ -57,6 +57,14 @@ class ModelService:
     @classmethod
     def get_active_model_info(cls, profile: str | None = None) -> dict[str, str]:
         """Return active architecture and underlying LLM model configuration."""
+        if profile and "direct" in str(profile).lower():
+            return {
+                "name": "Direct",
+                "id": "host-driven",
+                "provider": "none",
+                "architecture": "ARTEMIS Direct",
+            }
+
         # 1. Determine underlying LLM model and provider from config (cached)
         provider, model_id = cls._get_llm_provider_and_model()
 
@@ -95,6 +103,8 @@ class ModelService:
                     p = d_info.get("profile")
                     if p:
                         p_str = str(p).lower()
+                        if "direct" in p_str:
+                            return "direct"
                         if "pro" in p_str:
                             return "pro"
                         elif "flash" in p_str:

@@ -829,6 +829,10 @@ def make_wire_handler(
     actuator: Any,
     wrap: Callable[[ActionResult], CallToolResult],
     wrap_exception: Callable[[str, Exception], CallToolResult],
+    after_action: Callable[
+        [str, dict[str, Any], ActionResult, CallToolResult], Awaitable[CallToolResult]
+    ]
+    | None = None,
 ) -> Callable[..., Awaitable[CallToolResult]]:
     """Builds the FastMCP tool function for one wire dialect.
 
@@ -843,7 +847,11 @@ def make_wire_handler(
 
     async def handler(**kwargs: Any) -> Any:
         try:
-            return wrap(await wire.bind(actuator, kwargs))
+            action_result = await wire.bind(actuator, kwargs)
+            wrapped = wrap(action_result)
+            if after_action is not None:
+                return await after_action(spec.name, kwargs, action_result, wrapped)
+            return wrapped
         except Exception as e:  # pylint: disable=broad-exception-caught
             return wrap_exception(spec.name, e)
 

@@ -2,6 +2,11 @@
 
 Write executable tests based on device behavior verified with **ARTEMIS**. Before authoring a test, explore the target application and confirm its screens, transitions, and interactions. Use ARTEMIS device actions or ADB commands to investigate software and hardware behavior instead of assuming how an interaction works.
 
+### 0. Select the Installed MCP Mode
+- **Direct / Host-Driven mode (no separate model API key)** exposes atomic tools such as `list_devices`, `observe_screen`, `click`, `input_text`, `manage_app`, and `read_logcat`. The current MCP host (for example Codex or Claude Code) must run the observe → decide → act loop itself. Coordinates use a device-independent 0–1000 scale. For multi-step verification, wrap actions in `session_start` / `session_finish`, record host-evaluated assertions with `session_checkpoint`, and use the automatic post-action observations instead of assuming an action succeeded visually.
+- **Agent mode (separate model configuration required)** exposes `mobile_run_task`, `mobile_manage_task`, `mobile_get_device_state`, `mobile_inspect_trace`, and `mobile_diagnose`. Delegate complete goals to Flash or Pro and inspect the returned task state.
+- Determine the mode from the tools actually available. Never request an Artemis model API key in Direct mode, and never invent tools from the other mode.
+
 ### 1. The Runnable Code Principle & ARTEMIS Exploration
 - **When tasked with authoring tests**, deliver runnable test code with verified interactions and explicit wait conditions.
 - Before writing any test code, you must use the ARTEMIS MCP tools to interactively run and explore the target application. This allows you to discover the exact sequence of UI states, transitions, and required interactions.
@@ -34,6 +39,7 @@ Deeply understand and select between ARTEMIS's dual execution models (**ARTEMIS 
 - **Device Selection & Multi-Device Execution**: ARTEMIS supports multi-device execution and per-device concurrency. You can control device targeting via two modes:
   - **Direct Device Specification**: Explicitly provide the target phone's serial number via `device_serial` to `mobile_run_task` or `mobile_get_device_state`. Tasks targeting distinct devices run concurrently without blocking each other.
   - **Automatic Device Selection**: When `device_serial` is omitted or set to `None`, ARTEMIS automatically selects an available connected device or allocates an idle device from the device pool.
+  - **Direct Mode Binding**: Direct mode controls one device per MCP server process. Select it at installation with `--device <serial>` or set `ARTEMIS_DEVICE_ID`; restart the MCP server after changing it.
 - **Prioritize User Choice for Device Selection**:
   - When multiple connected devices or emulators are detected, or whenever device selection is ambiguous, **YOU MUST PRIORITIZE ASKING THE USER** to select or confirm their preferred device serial before launching a task.
 - **Device Diagnosis with `adb devices`**:
@@ -56,6 +62,7 @@ Deeply understand and select between ARTEMIS's dual execution models (**ARTEMIS 
   - **Dynamic-Only Frameworks**: If the framework does not support coordinate-based clicks, focus entirely on generating highly robust dynamic locators, leveraging ARTEMIS's element descriptions and XML tree analysis.
 
 ### 5. Environment Self-Diagnosis (`mobile_diagnose`)
+- This section applies to **Agent mode**. In Direct mode, inspect the tool error and run `uv run artemis doctor`; `mobile_diagnose` is intentionally not exposed there because Direct mode does not initialize Artemis model credentials.
 - **Diagnose before guessing**: Whenever an ARTEMIS tool returns an error, a task fails to start or is rejected, no device is found, or the user reports that ARTEMIS "doesn't work" in the IDE, call `mobile_diagnose` first. Do not troubleshoot by re-running `mobile_run_task` on trial and error, and do not ask the user to run `adb` commands by hand before you have the report.
 - **If `mobile_diagnose` is not in your tool list at all**, the MCP server itself failed to start: check the IDE's MCP server log and run `uv run artemis doctor` in the project directory (the CLI shares the same checks).
 - **Follow `next_steps` in order**: The report lists fixes in dependency order (Python runtime → config → MCP host → LLM credentials → device → optional video toolchain). `Run:` lines are single, local, non-destructive shell commands (one command per line, no `&&`) you may execute yourself (ask before installing software with winget / brew / apt). `Guidance:` lines describe something only the user can do (unlock the phone, tap "Allow" on the USB-debugging prompt, plug in a cable, free a port, tell you which IDE they use) — relay them verbatim. `Docs:` lines are references.

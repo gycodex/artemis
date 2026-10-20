@@ -37,6 +37,19 @@ def test_get_active_model_info_flash_architecture():
     assert info["provider"] == "google"
 
 
+def test_get_active_model_info_direct_does_not_resolve_llm_config():
+    with patch.object(ModelService, "_get_llm_provider_and_model") as resolve_llm:
+        info = ModelService.get_active_model_info("direct")
+
+    resolve_llm.assert_not_called()
+    assert info == {
+        "name": "Direct",
+        "id": "host-driven",
+        "provider": "none",
+        "architecture": "ARTEMIS Direct",
+    }
+
+
 def test_resolve_session_profile_from_device_info():
     """Verify profile resolution from device_info JSON."""
     row = {"device_info": json.dumps({"profile": "pro"})}
@@ -44,6 +57,9 @@ def test_resolve_session_profile_from_device_info():
 
     row_flash = {"device_info": json.dumps({"profile": "flash"})}
     assert ModelService.resolve_session_profile(row_flash) == "flash"
+
+    row_direct = {"device_info": json.dumps({"profile": "direct"})}
+    assert ModelService.resolve_session_profile(row_direct) == "direct"
 
 
 def test_resolve_session_profile_from_agent_names():

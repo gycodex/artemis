@@ -1,6 +1,6 @@
 # ✨ Artemis Showcase & User Workspace UI
 
-A modern, highly aesthetic presentation and interaction frontend built with **Angular 19** and **SCSS** for showcasing the Artemis mobile autonomous agent.
+A modern presentation and interaction frontend built with **Angular** and **SCSS** for autonomous and model-free Artemis mobile testing.
 
 ## 🎨 Visual Design Highlights
 
@@ -8,12 +8,13 @@ A modern, highly aesthetic presentation and interaction frontend built with **An
 * **Glassmorphism Aesthetic**: Translucent frosted-glass panels with subtle borders.
 * **Real-time Dual-Pane Workspace**:
   - **Left Pane (`app-agent-stream`)**: Live streaming of Agent thought steps, plan breakdowns, tool actions, and status.
-  - **Right Pane (`app-chat-interface`)**: Natural language chat input sidebar with interactive feedback and status pills.
+- **Right Pane (`app-chat-interface`)**: Natural language chat input sidebar with interactive feedback and status pills.
+* **Direct Control (`/direct`)**: Model-free live screen control, checkpoints, screenshots, Logcat, and test reports persisted into the standard Workspace history.
 
 ## 🚀 How to Run
 
 ### Prerequisites
-- Node.js (>= 18)
+- Node.js (>= 22.22.3)
 - Backend API running on `http://localhost:8000` (via `apps/admin_console` or `artemis ui`)
 
 ### Development Server

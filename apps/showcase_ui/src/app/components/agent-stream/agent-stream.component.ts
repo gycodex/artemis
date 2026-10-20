@@ -32,6 +32,7 @@ import {
   sessionElapsedSeconds,
   tuningLabel
 } from '../../utils/run-info.util';
+import { formatTaskStatusLabel } from '../../utils/status-label.util';
 
 export const PLANNING_LOADER_PHRASES: string[] = [
   'Planning next step...',
@@ -95,6 +96,50 @@ function formatStartupElapsed(seconds: number): string {
   return safeSeconds < 10
     ? `${safeSeconds.toFixed(1)}s`
     : `${Math.round(safeSeconds)}s`;
+}
+
+export function formatDirectStatusLabel(status?: string | null): string {
+  return formatTaskStatusLabel(status || 'completed');
+}
+
+export function localizeDirectDisplayText(text: string): string {
+  return (text || '')
+    .replace(/Native Heap/gi, '原生堆内存')
+    .replace(/PSS/g, '内存占用（PSS）')
+    .replace(/TOTAL 内存占用（PSS）/gi, '总内存占用（PSS）')
+    .replace(/Logcat/gi, '系统日志');
+}
+
+export function localizeDirectReportText(report: string): string {
+  return localizeDirectDisplayText(report)
+    .replace(/^## Summary$/gm, '## 测试摘要')
+    .replace(/^## Checkpoints$/gm, '## 检查点')
+    .replace(/^## Actions$/gm, '## 操作记录')
+    .replace(/^## Evidence Screenshots$/gm, '## 证据截图')
+    .replace(/^## Diagnostics$/gm, '## 诊断信息')
+    .replace(/^- Session:/gm, '- 会话编号：')
+    .replace(/^- Status:/gm, '- 状态：')
+    .replace(/^- Package:/gm, '- 应用包名：')
+    .replace(/^- Started:/gm, '- 开始时间：')
+    .replace(/^- Finished:/gm, '- 完成时间：')
+    .replace(/^- Actions:/gm, '- 操作次数：')
+    .replace(/^- Explicit observations:/gm, '- 主动观察次数：')
+    .replace(/^- Checkpoints:/gm, '- 检查点：')
+    .replace(/\*\*(passed|pass)\*\*/gi, '**通过**')
+    .replace(/\*\*(failed|fail)\*\*/gi, '**失败**')
+    .replace(/(\d+)\/(\d+) passed/gi, '$1/$2 通过')
+    .replace(/`manage_app`/g, '`启动应用`')
+    .replace(/`click`/g, '`点击`')
+    .replace(/`swipe`/g, '`滑动`')
+    .replace(/`press_key`/g, '`按键`')
+    .replace(/ — OK:/g, ' — 成功：')
+    .replace(/Launched app '([^']+)' \(([^)]+)\); foreground confirmed\./g, '已启动应用“$1”（$2），并确认处于前台。')
+    .replace(/Tapped at (\[[^\]]+\]) \(normalized\)\./g, '点击归一化坐标 $1。')
+    .replace(/Swiped from (\[[^\]]+\]) to (\[[^\]]+\]) \(normalized\)\./g, '从归一化坐标 $1 滑动到 $2。')
+    .replace(/Pressed key 'back'\./g, '已按下“返回”键。')
+    .replace(/^- Observation (\d+):/gm, '- 观察记录 $1：')
+    .replace(/^- Checkpoint:/gm, '- 检查点：')
+    .replace(/^- 系统日志:/gm, '- 系统日志：');
 }
 
 /**
@@ -414,6 +459,33 @@ export class AgentStreamComponent implements AfterViewInit {
     const notes = this.agentService.currentNotes();
     return notes['output.md'] || null;
   });
+
+  public isDirectSession = computed(() => {
+    const session = this.agentService.currentSession();
+    return session?.profile === 'direct' || session?.model_info?.name === 'Direct';
+  });
+
+  public directArtifacts = computed(() => this.agentService.currentDirectArtifacts());
+
+  public directReportMarkdown = computed(() => {
+    return localizeDirectReportText(this.directArtifacts()?.report || '');
+  });
+
+  public directStatusLabel(status?: string | null): string {
+    return formatDirectStatusLabel(status);
+  }
+
+  public taskStatusLabel(status?: string | null): string {
+    return formatTaskStatusLabel(status);
+  }
+
+  public isDirectFailure(status?: string | null): boolean {
+    return (status || '').toLowerCase() === 'failed';
+  }
+
+  public localizeDirectDisplayText(text: string): string {
+    return localizeDirectDisplayText(text);
+  }
 
   // Memoized so the Task Report card is not re-parsed (and its DOM rebuilt)
   // on every change-detection pass while streams are typing.
@@ -929,7 +1001,7 @@ export class AgentStreamComponent implements AfterViewInit {
 
   public deleteTask(sessionId: string, event?: Event): void {
     if (event) event.stopPropagation();
-    if (!confirm(`Are you sure you want to delete this task? This cannot be undone.`)) {
+    if (!confirm('确定要删除此任务吗？此操作无法撤销。')) {
       return;
     }
     this.agentService.deleteSession(sessionId).subscribe({
