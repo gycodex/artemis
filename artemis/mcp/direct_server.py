@@ -20,6 +20,7 @@ Artemis supplies typed device actions, screenshots, UI hierarchy, and Logcat.
 """
 
 import asyncio
+from contextlib import asynccontextmanager
 import re
 from typing import Any, Literal
 
@@ -145,12 +146,31 @@ def build_direct_server(
         ingress=ingress,
         persist_history=persist_history,
     )
+
+    @asynccontextmanager
+    async def lifespan(_server):
+        try:
+            yield
+        finally:
+            await session.close()
+
     server = build_action_server(
         actuator,
         name=name,
         after_action=session.after_action,
         after_observe=session.after_observe,
+        lifespan=lifespan,
     )
+
+    @server.tool()
+    async def recording_start() -> CallToolResult:
+        """Record continuous video into the active Direct session (scrcpy/ffmpeg required)."""
+        return await session.recording_start()
+
+    @server.tool()
+    async def recording_stop() -> CallToolResult:
+        """Finalize this session's owned video and segmented timeline."""
+        return await session.recording_stop()
 
     @server.tool()
     async def session_start(

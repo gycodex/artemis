@@ -78,6 +78,7 @@ def build_action_server(
         [ObserveResult, bytes | None, CallToolResult], Awaitable[CallToolResult]
     ]
     | None = None,
+    lifespan: Any = None,
 ) -> FastMCP:
     """Builds a FastMCP server exposing exactly what ``actuator`` implements.
 
@@ -86,7 +87,7 @@ def build_action_server(
     """
     validate_actuator(actuator)
     caps = actuator.capabilities()
-    mcp = FastMCP(name)
+    mcp = FastMCP(name, lifespan=lifespan)
 
     # --- Device actions (registered only when implemented) ---------------------------
     # Declarations and argument conversion both come from the canonical manifest

@@ -33,6 +33,7 @@ from artemis.data_engine.models import SessionMetadata
 from artemis.data_engine.storage import StorageManager
 from artemis.mcp.action_types import ActionResult, ObserveResult
 from artemis.mcp.observation import observe
+from artemis.mcp.direct_timeline import write_timeline
 from artemis.tools.mobile.log_utils import fetch_and_filter_logs
 
 __all__ = ["DirectSession"]
@@ -62,6 +63,69 @@ class DirectSession:
         self._persist_history = persist_history
         self._state: dict[str, Any] | None = None
         self._last_report: str | None = None
+        self._recording: dict[str, Any] | None = None
+
+    def _offset_ms(self) -> int:
+        return max(0, int((time.time() - self._state["started_at_epoch"]) * 1000))
+
+    async def recording_start(self) -> CallToolResult:
+        """Start an owned recording, reusing controller rotation/segment handling."""
+        if not self._state or self._recording:
+            return self._result("Start a session first; only one recording may be active.",
+                                {"ok": False})
+        output = Path(self._state["output_dir"]) / f"video-{len(self._state['recordings']) + 1:03d}"
+        record = {"output_dir": str(output), "offset_ms": self._offset_ms(), "status": "starting"}
+        self._state["recordings"].append(record)
+        try:
+            controller = self._controller_factory()
+            result = await controller.start_video_recording(output_dir=output)
+            if not result.success:
+                raise RuntimeError(result.message)
+            self._recording = record
+            record["status"] = "recording"
+            record["video_id"] = str(getattr(result, "video_id", "") or "")
+            # Make the existing recording manifest use the Direct session clock.
+            from third_party.mobile_use.utils.video import get_active_session
+            device_id = getattr(getattr(self._context_factory(), "device", None), "device_id", "")
+            active = get_active_session(device_id)
+            if active is not None:
+                active.data_engine_start_time = self._state["started_at_epoch"]
+                record["offset_ms"] = max(
+                    0, int((active.start_time - self._state["started_at_epoch"]) * 1000)
+                )
+            self._write_state()
+            return self._result("Recording started.", {"ok": True, "recording": record})
+        except Exception as exc:
+            record.update(status="failed", error=str(exc))
+            self._state["artifacts"]["recording_error"] = str(exc)
+            self._write_state()
+            return self._result(str(exc), {"ok": False, "recording": record})
+
+    async def recording_stop(self) -> CallToolResult:
+        if not self._state or self._recording is None:
+            return self._result("No owned recording is active.", {"ok": False})
+        record = self._recording
+        try:
+            result = await self._controller_factory().stop_video_recording()
+            if not result.success:
+                raise RuntimeError(result.message)
+            record.update(status="stopped", end_offset_ms=self._offset_ms())
+            if result.video_path:
+                record["video_path"] = str(result.video_path)
+            return self._result("Recording stopped.", {"ok": True, "recording": record})
+        except Exception as exc:
+            record.update(status="failed", error=str(exc))
+            self._state["artifacts"]["recording_error"] = str(exc)
+            return self._result(str(exc), {"ok": False, "recording": record})
+        finally:
+            self._recording = None
+            self._write_state()
+
+    async def close(self) -> None:
+        """Finalize owned evidence when the MCP transport exits normally."""
+        if self.active:
+            await self.finish("aborted", "MCP connection closed before session_finish.",
+                              include_logcat=False)
 
     @property
     def active(self) -> bool:
@@ -192,6 +256,7 @@ class DirectSession:
             "actions": [],
             "observations": [],
             "checkpoints": [],
+            "recordings": [],
             "summary": "",
             "artifacts": {},
         }
@@ -222,6 +287,7 @@ class DirectSession:
         item = {
             "index": len(self._state["observations"]) + 1,
             "timestamp": datetime.now().astimezone().isoformat(),
+            "offset_ms": self._offset_ms(),
             "observation": payload,
         }
         self._state["observations"].append(item)
@@ -247,6 +313,7 @@ class DirectSession:
             return wrapped
         observation = None
         image_bytes = None
+        completed_offset = self._offset_ms()
         if self._state["auto_observe"]:
             try:
                 observation, image_bytes = await self._capture(action)
@@ -255,6 +322,7 @@ class DirectSession:
         event = {
             "index": len(self._state["actions"]) + 1,
             "timestamp": datetime.now().astimezone().isoformat(),
+            "offset_ms": completed_offset,
             "action": action,
             "arguments": arguments,
             "result": action_result.model_dump(mode="json"),
@@ -311,6 +379,7 @@ class DirectSession:
         item = {
             "index": len(self._state["checkpoints"]) + 1,
             "timestamp": datetime.now().astimezone().isoformat(),
+            "offset_ms": self._offset_ms(),
             "name": name,
             "passed": outcome == "passed",
             "outcome": outcome,
@@ -393,6 +462,10 @@ class DirectSession:
             path = (item.get("observation") or {}).get("screenshot_path")
             if path:
                 evidence.append((f"Checkpoint: {item['name']}", path))
+        for item in self._state["actions"]:
+            path = (item.get("observation") or {}).get("screenshot_path")
+            if path:
+                evidence.append((f"Action {item['index']}", path))
         if evidence:
             lines.extend(["", "## Evidence Screenshots", ""])
             for label, path in evidence:
@@ -407,6 +480,7 @@ class DirectSession:
         if self._state.get("verdict_reasons"):
             lines.extend(["", "## Verdict limits", ""])
             lines.extend(f"- {reason}" for reason in self._state["verdict_reasons"])
+        lines.extend(["", "## Timeline", "", "[Open offline evidence timeline](timeline.html)"])
         return "\n".join(lines) + "\n"
 
     async def finish(
@@ -421,6 +495,8 @@ class DirectSession:
         if status not in {"passed", "failed", "aborted", "incomplete"}:
             return self._result("Invalid session status.", {"ok": False})
         self._state["requested_status"] = status
+        if self._recording is not None:
+            await self.recording_stop()
         self._state["status"] = status
         self._state["summary"] = summary
         self._state["finished_at"] = datetime.now().astimezone().isoformat()
@@ -465,11 +541,19 @@ class DirectSession:
         output_dir = Path(self._state["output_dir"])
         report_path = output_dir / "report.md"
         json_path = output_dir / "session.json"
+        try:
+            timeline_path = write_timeline(self._state)
+            self._state["artifacts"]["timeline"] = str(timeline_path)
+        except Exception as exc:
+            self._state["artifacts"]["timeline_error"] = str(exc)
+            if self._state["status"] == "passed":
+                self._state["status"] = "incomplete"
         self._write_state()
         report_path.write_text(self._markdown(), encoding="utf-8")
         await asyncio.to_thread(self._persist, finished=True)
         session_id = self._state["session_id"]
         result_status = self._state["status"]
+        timeline_result = self._state["artifacts"].get("timeline")
         self._last_report = str(report_path)
         self._state = None
         return self._result(
@@ -480,6 +564,7 @@ class DirectSession:
                 "status": result_status,
                 "report_path": str(report_path),
                 "json_path": str(json_path),
+                "timeline_path": timeline_result,
             },
             final_image,
         )
