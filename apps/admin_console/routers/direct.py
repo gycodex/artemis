@@ -62,13 +62,15 @@ class DirectActionRequest(BaseModel):
 
 class DirectCheckpointRequest(BaseModel):
     name: str = Field(min_length=1)
-    passed: bool
+    passed: bool | None = None
     details: str = ""
     capture_screen: bool = True
+    outcome: Literal["passed", "failed", "blocked", "skipped", "not_run"] | None = None
+    category: Literal["functional", "visual", "performance"] = "functional"
 
 
 class DirectFinishRequest(BaseModel):
-    status: Literal["passed", "failed", "aborted"] = "passed"
+    status: Literal["passed", "failed", "aborted", "incomplete"] = "passed"
     summary: str = ""
     include_logcat: bool = True
     logcat_lines: int = Field(default=1000, ge=1, le=5000)

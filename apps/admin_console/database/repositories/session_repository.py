@@ -130,6 +130,7 @@ class SessionRepository:
                     continue
                 status = {
                     "passed": "completed",
+                    "incomplete": "cancelled",
                     "failed": "failed",
                     "aborted": "cancelled",
                 }.get(direct_status, "failed")
@@ -184,6 +185,7 @@ class SessionRepository:
         """Finalize a Direct run and attach its generated artifacts."""
         canonical_status = {
             "passed": "completed",
+            "incomplete": "cancelled",
             "failed": "failed",
             "aborted": "cancelled",
         }.get(str(direct_status).lower(), "failed")

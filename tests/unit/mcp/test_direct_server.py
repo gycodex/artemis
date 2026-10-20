@@ -208,6 +208,10 @@ async def test_mcp_direct_session_persists_in_workspace_history(tmp_path: Path):
                 "session_start", {"name": "MCP persisted test", "auto_observe": False}
             )
             await session.call_raw(
+                "session_checkpoint",
+                {"name": "history assertion", "passed": True, "capture_screen": False},
+            )
+            await session.call_raw(
                 "session_finish", {"status": "passed", "include_logcat": False}
             )
 

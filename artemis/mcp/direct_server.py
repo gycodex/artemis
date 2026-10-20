@@ -93,11 +93,20 @@ def _filter_logcat(
 ) -> str:
     lines = logs.splitlines()
     if package_name:
+        if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)+", package_name):
+            raise ValueError("Invalid Android package name")
         package_lower = package_name.lower()
-        process_ids = process_ids or set()
+        process_ids = set(process_ids or ())
+        package_pattern = re.escape(package_name) + r"(?::[A-Za-z0-9_.]+)?"
+        # Include processes that have exited before pidof, including SDK services.
+        for line in lines:
+            started = re.search(rf"\bStart proc (\d+):{package_pattern}/", line)
+            crashed = re.search(rf"\bProcess: {package_pattern}, PID: (\d+)", line)
+            if match := started or crashed:
+                process_ids.add(match.group(1))
 
         def belongs_to_package(line: str) -> bool:
-            if package_lower in line.lower():
+            if re.search(rf"(?<![\w.]){re.escape(package_lower)}(?=[:/\s,}}]|$)", line.lower()):
                 return True
             # Android's threadtime format starts with date, time, PID, and TID.
             match = re.match(r"^\S+\s+\S+\s+(\d+)\s+\d+\s+", line)
@@ -106,7 +115,8 @@ def _filter_logcat(
         lines = [line for line in lines if belongs_to_package(line)]
     if errors_only:
         error_pattern = re.compile(
-            r"(?:\s[EF]/|fatal exception|androidruntime|\banr\b|am_crash|crash)",
+            r"(?:^\S+\s+\S+\s+\d+\s+\d+\s+[EF]\s|(?:^|\s)[EF]/"
+            r"|fatal exception|fatal signal|\banr\b|am_crash|crash)",
             re.IGNORECASE,
         )
         lines = [line for line in lines if error_pattern.search(line)]
@@ -154,12 +164,14 @@ def build_direct_server(
     @server.tool()
     async def session_checkpoint(
         name: str,
-        passed: bool,
+        passed: bool | None = None,
         details: str = "",
         capture_screen: bool = True,
+        outcome: Literal["passed", "failed", "blocked", "skipped", "not_run"] | None = None,
+        category: Literal["functional", "visual", "performance"] = "functional",
     ) -> CallToolResult:
         """Record a host-evaluated assertion, optionally with the current screen."""
-        return await session.checkpoint(name, passed, details, capture_screen)
+        return await session.checkpoint(name, passed, details, capture_screen, outcome, category)
 
     @server.tool()
     async def session_status() -> CallToolResult:
@@ -168,7 +180,7 @@ def build_direct_server(
 
     @server.tool()
     async def session_finish(
-        status: Literal["passed", "failed", "aborted"] = "passed",
+        status: Literal["passed", "failed", "aborted", "incomplete"] = "passed",
         summary: str = "",
         include_logcat: bool = True,
         logcat_lines: int = 1000,
@@ -243,10 +255,21 @@ def build_direct_server(
             ctx = current_ctx()
             process_ids: set[str] = set()
             if package_name:
+                if not re.fullmatch(
+                    r"[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)+", package_name
+                ):
+                    raise ValueError("Invalid Android package name")
                 device = get_adb_device(ctx)
                 if device is not None:
                     pid_output = await asyncio.to_thread(device.shell, f"pidof {package_name}")
                     process_ids = set(str(pid_output).split())
+                    processes = await asyncio.to_thread(device.shell, "ps -A")
+                    for line in str(processes).splitlines():
+                        fields = line.split()
+                        if len(fields) > 2 and (
+                            fields[-1] == package_name or fields[-1].startswith(package_name + ":")
+                        ) and fields[1].isdigit():
+                            process_ids.add(fields[1])
             logs = await asyncio.to_thread(
                 fetch_and_filter_logs,
                 ctx,
@@ -261,6 +284,10 @@ def build_direct_server(
                 "returned_lines": len(filtered.splitlines()) if filtered else 0,
                 "package_name": package_name,
                 "errors_only": errors_only,
+                "since_time": since_time,
+                "source_lines": len(logs.splitlines()),
+                "possibly_truncated": len(logs.splitlines()) >= safe_lines,
+                "coverage": "bounded_snapshot_not_proof_of_no_errors",
             }
             return _result(filtered or "No matching Logcat entries.", payload)
         except Exception as exc:

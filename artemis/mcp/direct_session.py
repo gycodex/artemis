@@ -113,7 +113,8 @@ class DirectSession:
         storage = StorageManager(get_data_engine_db_path(), get_traces_dir())
         direct_status = str(self._state.get("status") or "running")
         status = (
-            {"passed": "completed", "failed": "failed", "aborted": "cancelled"}.get(
+            {"passed": "completed", "failed": "failed", "aborted": "cancelled",
+             "incomplete": "cancelled"}.get(
                 direct_status, "running"
             )
             if finished
@@ -176,7 +177,7 @@ class DirectSession:
         output_dir = get_traces_dir() / session_id
         output_dir.mkdir(parents=True, exist_ok=False)
         self._state = {
-            "schema_version": 1,
+            "schema_version": 2,
             "session_id": session_id,
             "name": name.strip() or "Direct mobile test",
             "package_name": package_name,
@@ -282,12 +283,24 @@ class DirectSession:
     async def checkpoint(
         self,
         name: str,
-        passed: bool,
+        passed: bool | None = None,
         details: str = "",
         capture_screen: bool = True,
+        outcome: Literal["passed", "failed", "blocked", "skipped", "not_run"] | None = None,
+        category: Literal["functional", "visual", "performance"] = "functional",
     ) -> CallToolResult:
         if not self._state:
             return self._result("No Direct test session is active.", {"ok": False})
+        if outcome is None:
+            if passed is None:
+                return self._result("Supply passed or outcome.", {"ok": False})
+            outcome = "passed" if passed else "failed"
+        if outcome not in {"passed", "failed", "blocked", "skipped", "not_run"}:
+            return self._result("Invalid checkpoint outcome.", {"ok": False})
+        if category not in {"functional", "visual", "performance"}:
+            return self._result("Invalid checkpoint category.", {"ok": False})
+        if passed is not None and outcome != ("passed" if passed else "failed"):
+            return self._result("passed and outcome disagree.", {"ok": False})
         observation = None
         image_bytes = None
         if capture_screen:
@@ -299,14 +312,16 @@ class DirectSession:
             "index": len(self._state["checkpoints"]) + 1,
             "timestamp": datetime.now().astimezone().isoformat(),
             "name": name,
-            "passed": bool(passed),
+            "passed": outcome == "passed",
+            "outcome": outcome,
+            "category": category,
             "details": details,
             "observation": observation,
         }
         self._state["checkpoints"].append(item)
         self._write_state()
         return self._result(
-            f"Checkpoint {'passed' if passed else 'failed'}: {name}",
+            f"Checkpoint {outcome}: {name}",
             {"ok": True, "checkpoint": item},
             image_bytes,
         )
@@ -355,8 +370,10 @@ class DirectSession:
         ]
         if checkpoints:
             for item in checkpoints:
-                mark = "PASS" if item["passed"] else "FAIL"
-                lines.append(f"- **{mark}** — {item['name']}: {item['details'] or '-'}")
+                mark = item["outcome"].upper()
+                lines.append(
+                    f"- **{mark}** [{item['category']}] — {item['name']}: {item['details'] or '-'}"
+                )
         else:
             lines.append("- No checkpoints recorded.")
         lines.extend(["", "## Actions", ""])
@@ -383,17 +400,27 @@ class DirectSession:
         logcat = self._state["artifacts"].get("logcat")
         if logcat:
             lines.extend(["", "## Diagnostics", "", f"- Logcat: `{logcat}`"])
+            lines.append("- Coverage: bounded recent buffer; absence is not proof of no errors.")
+        for key, value in self._state["artifacts"].items():
+            if key.endswith("_error"):
+                lines.append(f"- Evidence unavailable ({key}): {value}")
+        if self._state.get("verdict_reasons"):
+            lines.extend(["", "## Verdict limits", ""])
+            lines.extend(f"- {reason}" for reason in self._state["verdict_reasons"])
         return "\n".join(lines) + "\n"
 
     async def finish(
         self,
-        status: Literal["passed", "failed", "aborted"] = "passed",
+        status: Literal["passed", "failed", "aborted", "incomplete"] = "passed",
         summary: str = "",
         include_logcat: bool = True,
         logcat_lines: int = 1000,
     ) -> CallToolResult:
         if not self._state:
             return self._result("No Direct test session is active.", {"ok": False})
+        if status not in {"passed", "failed", "aborted", "incomplete"}:
+            return self._result("Invalid session status.", {"ok": False})
+        self._state["requested_status"] = status
         self._state["status"] = status
         self._state["summary"] = summary
         self._state["finished_at"] = datetime.now().astimezone().isoformat()
@@ -417,6 +444,24 @@ class DirectSession:
                 self._state["artifacts"]["logcat"] = str(log_path)
             except Exception as exc:
                 self._state["artifacts"]["logcat_error"] = str(exc)
+        coverage: dict[str, dict[str, int]] = {}
+        checks = self._state["checkpoints"]
+        for check in checks:
+            counts = coverage.setdefault(check["category"], {})
+            counts[check["outcome"]] = counts.get(check["outcome"], 0) + 1
+        self._state["coverage"] = coverage
+        reasons = []
+        if any(check["outcome"] == "failed" for check in checks):
+            reasons.append("One or more checkpoints failed.")
+            if status != "aborted":
+                self._state["status"] = "failed"
+        if not checks or any(check["outcome"] not in {"passed", "failed"} for check in checks):
+            reasons.append("Some scenarios are unverified, or no checkpoints were recorded.")
+        if any(key.endswith("_error") for key in self._state["artifacts"]):
+            reasons.append("Requested diagnostic evidence could not be collected.")
+        if reasons and self._state["status"] == "passed":
+            self._state["status"] = "incomplete"
+        self._state["verdict_reasons"] = reasons
         output_dir = Path(self._state["output_dir"])
         report_path = output_dir / "report.md"
         json_path = output_dir / "session.json"
