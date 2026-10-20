@@ -26,6 +26,7 @@ import time
 from typing import Any, Literal
 import uuid
 
+import anyio
 from mcp.types import CallToolResult, ImageContent, TextContent
 
 from artemis.config.paths import get_data_engine_db_path, get_traces_dir
@@ -69,6 +70,27 @@ class DirectSession:
         return max(0, int((time.time() - self._state["started_at_epoch"]) * 1000))
 
     async def recording_start(self) -> CallToolResult:
+        return await self._finish_recording_operation(self._recording_start())
+
+    @staticmethod
+    async def _finish_recording_operation(operation) -> CallToolResult:
+        """Do not lose recorder ownership when a caller cancels mid-operation."""
+        cancelled = False
+        with anyio.CancelScope(shield=True):
+            task = asyncio.create_task(operation)
+            while True:
+                try:
+                    result = await asyncio.shield(task)
+                    break
+                except asyncio.CancelledError:
+                    if task.cancelled():
+                        raise
+                    cancelled = True
+            if cancelled:
+                raise asyncio.CancelledError
+            return result
+
+    async def _recording_start(self) -> CallToolResult:
         """Start an owned recording, reusing controller rotation/segment handling."""
         if not self._state or self._recording:
             return self._result("Start a session first; only one recording may be active.",
@@ -102,10 +124,18 @@ class DirectSession:
             return self._result(str(exc), {"ok": False, "recording": record})
 
     async def recording_stop(self) -> CallToolResult:
+        return await self._finish_recording_operation(self._recording_stop())
+
+    async def _recording_stop(self) -> CallToolResult:
         if not self._state or self._recording is None:
             return self._result("No owned recording is active.", {"ok": False})
         record = self._recording
         try:
+            from third_party.mobile_use.utils.video import get_active_session
+            device_id = getattr(getattr(self._context_factory(), "device", None), "device_id", "")
+            active = get_active_session(device_id)
+            if active is not None and str(active.video_id) != record.get("video_id"):
+                raise RuntimeError("Recording ownership changed; refusing to stop another recording.")
             result = await self._controller_factory().stop_video_recording()
             if not result.success:
                 raise RuntimeError(result.message)
@@ -411,6 +441,7 @@ class DirectSession:
                 "action_count": len(self._state["actions"]),
                 "checkpoint_count": len(self._state["checkpoints"]),
                 "auto_observe": self._state["auto_observe"],
+                "recording": self._recording is not None,
             },
         )
 
@@ -504,6 +535,10 @@ class DirectSession:
         try:
             final_obs, final_image = await self._capture("final")
             self._state["artifacts"]["final_observation"] = final_obs
+            if final_obs and final_obs.get("ok") is False:
+                self._state["artifacts"]["final_observation_error"] = final_obs.get(
+                    "message", "Final screenshot failed"
+                )
         except Exception as exc:
             self._state["artifacts"]["final_observation_error"] = str(exc)
         if include_logcat:
@@ -535,6 +570,14 @@ class DirectSession:
             reasons.append("Some scenarios are unverified, or no checkpoints were recorded.")
         if any(key.endswith("_error") for key in self._state["artifacts"]):
             reasons.append("Requested diagnostic evidence could not be collected.")
+        for collection in ("actions", "observations", "checkpoints"):
+            for event in self._state[collection]:
+                evidence = event.get("observation") or {}
+                if evidence.get("ok") is False:
+                    reasons.append(
+                        f"{collection} #{event['index']} evidence unavailable: "
+                        f"{evidence.get('message', 'capture failed')}"
+                    )
         if reasons and self._state["status"] == "passed":
             self._state["status"] = "incomplete"
         self._state["verdict_reasons"] = reasons

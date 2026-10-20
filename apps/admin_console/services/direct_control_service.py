@@ -38,6 +38,11 @@ DIRECT_WEB_ACTIONS = frozenset(
         "open_link",
         "erase_one_char",
         "focus_and_clear_text",
+        "recording_start",
+        "recording_stop",
+        "click_element",
+        "wait_for_element",
+        "wait_for_app",
     }
 )
 
@@ -92,7 +97,8 @@ class DirectControlService:
             )
             await asyncio.to_thread(device_lock.acquire, blocking=False)
             action_session = ActionSession(
-                build_direct_adb_server(device_serial, ingress="web-direct")
+                build_direct_adb_server(device_serial, ingress="web-direct"),
+                close_timeout=60.0,
             )
             try:
                 await action_session.start()

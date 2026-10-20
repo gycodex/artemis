@@ -9,6 +9,7 @@ describe('Direct history presentation helpers', () => {
     expect(formatDirectStatusLabel('passed')).toBe('通过');
     expect(formatDirectStatusLabel('failed')).toBe('失败');
     expect(formatDirectStatusLabel('running')).toBe('运行中');
+    expect(formatDirectStatusLabel('incomplete')).toBe('未完整验证');
     expect(formatDirectStatusLabel(undefined)).toBe('已完成');
   });
 

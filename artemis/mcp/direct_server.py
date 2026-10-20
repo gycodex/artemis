@@ -20,9 +20,14 @@ Artemis supplies typed device actions, screenshots, UI hierarchy, and Logcat.
 """
 
 import asyncio
+import anyio
 from contextlib import asynccontextmanager
+from contextvars import ContextVar
+from functools import wraps
 import re
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
+
+from pydantic import Field
 
 from mcp.server.fastmcp import FastMCP
 from mcp.types import CallToolResult, TextContent
@@ -32,6 +37,8 @@ from artemis.mcp.action_server import build_action_server
 from artemis.mcp.actuators.adb import AdbActuator
 from artemis.mcp.actuators.base import Actuator
 from artemis.mcp.direct_session import DirectSession
+from artemis.mcp.direct_selectors import DirectSelectors, Selector
+from artemis.mcp.direct_cases import run_case as execute_case
 from artemis.tools.mobile.log_utils import fetch_and_filter_logs
 from third_party.mobile_use.controllers.platform_specific_commands_controller import (
     get_adb_device,
@@ -146,13 +153,19 @@ def build_direct_server(
         ingress=ingress,
         persist_history=persist_history,
     )
+    operation_lock = asyncio.Lock()
+    in_operation = ContextVar(f"direct_operation_{id(session)}", default=False)
 
     @asynccontextmanager
     async def lifespan(_server):
         try:
             yield
         finally:
-            await session.close()
+            # The MCP memory/stdio transport cancels its AnyIO task group on exit.
+            # Preserve the recorder's flush and report writes during that shutdown.
+            with anyio.CancelScope(shield=True):
+                async with operation_lock:
+                    await session.close()
 
     server = build_action_server(
         actuator,
@@ -161,6 +174,51 @@ def build_direct_server(
         after_observe=session.after_observe,
         lifespan=lifespan,
     )
+    selectors = DirectSelectors(actuator)
+
+    @server.tool()
+    async def run_case(case: dict) -> CallToolResult:
+        """Execute a validated JSON regression case with waits, assertions and JUnit output.
+
+        The case owns a new Direct session. Steps are allowlisted device tools, not shell
+        commands. Set assertion=true only on wait tools. Execution stops at the first failure.
+        """
+        return await execute_case(server, session, case)
+
+    async def record_result(action, arguments, result):
+        wrapped = _result(result.message, result.model_dump(mode="json"))
+        return await session.after_action(action, arguments, result, wrapped)
+
+    @server.tool()
+    async def click_element(selector: Selector, fallback_target: list[int] | None = None) -> CallToolResult:
+        """Click a unique fresh UI match; optional fallback only when no match exists."""
+        result = await selectors.click(selector, fallback_target)
+        return await record_result("click_element",
+                                   {"selector": selector.model_dump(exclude_none=True),
+                                    "fallback_target": fallback_target}, result)
+
+    @server.tool()
+    async def wait_for_element(
+        selector: Selector,
+        state: Literal["present", "absent", "enabled", "stable"] = "present",
+        timeout_ms: Annotated[int, Field(ge=1, le=60000)] = 5000,
+        stable_ms: Annotated[int, Field(ge=1, le=60000)] = 500,
+    ) -> CallToolResult:
+        """Wait for fresh UI state without model-turn polling. Timeout: 1..60000 ms."""
+        result = await selectors.wait(selector, state, timeout_ms, stable_ms)
+        return await record_result("wait_for_element",
+                                   {"selector": selector.model_dump(exclude_none=True),
+                                    "state": state, "timeout_ms": timeout_ms,
+                                    "stable_ms": stable_ms}, result)
+
+    @server.tool()
+    async def wait_for_app(
+        package_name: str, timeout_ms: Annotated[int, Field(ge=1, le=60000)] = 5000,
+    ) -> CallToolResult:
+        """Wait until the named package is foreground, including OAuth app handoffs."""
+        result = await selectors.wait_app(package_name, timeout_ms)
+        return await record_result("wait_for_app",
+                                   {"package_name": package_name, "timeout_ms": timeout_ms}, result)
 
     @server.tool()
     async def recording_start() -> CallToolResult:
@@ -316,6 +374,24 @@ def build_direct_server(
                 {"ok": False, "error": str(exc)},
             )
 
+    # One server owns one device/session. A case invokes registered tools internally;
+    # those nested calls share its context and must not deadlock on this same lock.
+    def serialize(fn):
+        @wraps(fn)
+        async def guarded(*args, **kwargs):
+            if in_operation.get():
+                return await fn(*args, **kwargs)
+            async with operation_lock:
+                token = in_operation.set(True)
+                try:
+                    return await fn(*args, **kwargs)
+                finally:
+                    in_operation.reset(token)
+        return guarded
+
+    for tool in server._tool_manager.list_tools():
+        if tool.name != "session_status":
+            tool.fn = serialize(tool.fn)
     return server
 
 

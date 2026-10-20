@@ -1,4 +1,5 @@
 import json
+import asyncio
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
@@ -79,3 +80,73 @@ async def test_duplicate_recording_start_does_not_restart_controller(direct):
     assert result.structuredContent["ok"] is False
     controller.start_video_recording.assert_awaited_once()
     await session.close()
+
+
+@pytest.mark.parametrize("operation", ["start", "stop"])
+async def test_cancelled_recording_operation_completes_before_close(direct, operation):
+    session, controller = direct
+    await session.start("cancel lifecycle")
+    entered = asyncio.Event()
+    released = asyncio.Event()
+    original = getattr(controller, f"{operation}_video_recording")
+
+    async def delayed(**kwargs):
+        entered.set()
+        await released.wait()
+        return await original(**kwargs)
+
+    if operation == "stop":
+        await session.recording_start()
+    setattr(controller, f"{operation}_video_recording", delayed)
+    task = asyncio.create_task(getattr(session, f"recording_{operation}")())
+    await entered.wait()
+    task.cancel()
+    await asyncio.sleep(0)
+    released.set()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    await session.close()
+    assert session._recording is None
+    original.assert_awaited_once()
+    state = json.loads(Path(session.status().structuredContent["last_report"]).with_name(
+        "session.json").read_text("utf-8"))
+    assert state["recordings"][0]["status"] == "stopped"
+
+
+async def test_stop_does_not_stop_a_replacement_recording(direct):
+    session, controller = direct
+    await session.start("ownership")
+    await session.recording_start()
+    with patch("third_party.mobile_use.utils.video.get_active_session",
+               return_value=SimpleNamespace(video_id="different-recording")):
+        result = await session.recording_stop()
+    assert result.structuredContent["ok"] is False
+    controller.stop_video_recording.assert_not_awaited()
+    await session.close()
+
+
+async def test_transport_shutdown_awaits_recording_cleanup(tmp_path):
+    import asyncio
+    from artemis.mcp.action_session import ActionSession
+    from artemis.mcp.actuators import MockActuator
+    from artemis.mcp.direct_server import build_direct_server
+    actuator = MockActuator()
+    completed = []
+    actuator.controller.start_video_recording = AsyncMock(
+        return_value=SimpleNamespace(success=True, message="started", video_id="owned"))
+
+    async def stop():
+        await asyncio.sleep(0.1)
+        completed.append(True)
+        return SimpleNamespace(success=True, message="stopped", video_path=None)
+
+    actuator.controller.stop_video_recording = stop
+    client = await ActionSession(build_direct_server(actuator, persist_history=False)).start()
+    with patch("artemis.mcp.direct_session.get_traces_dir", return_value=tmp_path):
+        started = await client.call_raw("session_start", {"name": "transport exit"})
+        await client.call_raw("recording_start", {})
+        await client.aclose()
+    assert completed == [True]
+    root = Path(started.structuredContent["output_dir"])
+    assert json.loads((root / "session.json").read_text("utf-8"))["status"] == "aborted"
+    assert (root / "report.md").is_file()

@@ -18,7 +18,7 @@ def _result(payload: dict, image: bool = False) -> CallToolResult:
 
 
 class FakeActionSession:
-    def __init__(self, _server):
+    def __init__(self, _server, *, close_timeout=5.0):
         self.started = False
         self.calls: list[tuple[str, dict]] = []
         self.closed = False

@@ -128,6 +128,8 @@ Direct 模式会先完成 MCP 握手，再连接 Android；在 Codex 中默认�
 
 在 Direct 模式下，宿主通常先调用 `observe_screen(include_image=true)`，再选择动作并调用 `click` 等采用 0–1000 归一化坐标的工具，随后重新观察以验证结果。会话中的显式观察会自动归档为证据，完成后的 MCP 会话会与 Web Direct 一样进入 Workspace 历史；配置为 `127.0.0.1:7555` 等 TCP 模拟器序列号时，本地 ADB 重启后还会自动恢复连接。`read_logcat` 提供有行数上限、只读的诊断快照。
 
+Direct 还支持五态检查点、连续录像及离线时间轴、语义控件定位和带 JUnit 输出的 JSON 回归用例。缺失检查或证据时会标记 `incomplete`，不会直接判为通过。工具、依赖与 PowerShell 用法见 [Direct 回归与证据说明](docs/direct-regression.md)。
+
 对于多步骤验证，Direct 模式还提供无需额外模型的会话层：先调用 `session_start`，照常使用设备工具，通过 `session_checkpoint` 记录由宿主判断的断言，最后调用 `session_finish`。会话期间会记录设备动作，并可在每次动作后自动返回和保存观察结果；结束时会在 Artemis 的 traces 目录生成 `report.md`、`session.json`、截图以及可选的有界 `logcat.txt`。这样可以获得接近 Agent 模式的证据链和报告，但仍只由 Codex 或 Claude Code 负责推理。
 
 ### 1. 一键自动安装到 IDE（推荐）

@@ -126,6 +126,11 @@ Direct mode completes the MCP handshake before connecting to Android and is inst
 
 In Direct mode, the host normally calls `observe_screen(include_image=true)`, chooses an action, calls a normalized 0–1000 coordinate tool such as `click`, and observes again to verify the result. Explicit observations made during a session are archived as evidence, and finished MCP sessions appear in the same Workspace history as Web Direct runs. A configured TCP emulator serial such as `127.0.0.1:7555` is automatically reconnected after a local ADB restart. `read_logcat` provides a bounded, read-only diagnostic snapshot.
 
+Direct also supports five-outcome checkpoints, continuous recording with an offline
+timeline, semantic selectors, and declarative JSON regression cases with JUnit
+output. Unverified checks or missing requested evidence yield `incomplete`.
+See [Direct regression and evidence](docs/direct-regression.md) for dependencies and usage.
+
 For multi-step validation, Direct mode also has a model-free session layer: call `session_start`, use the normal device tools, record host-evaluated assertions with `session_checkpoint`, and call `session_finish`. While a session is active, actions are recorded and can automatically return and save a post-action observation. Finishing writes `report.md`, `session.json`, screenshots, and an optional bounded `logcat.txt` under the Artemis traces directory. This adds Agent-like evidence and reporting while Codex or Claude Code remains the only reasoning model.
 
 ### 1. One-Click Auto Install (Recommended)

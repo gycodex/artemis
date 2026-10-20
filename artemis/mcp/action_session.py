@@ -66,8 +66,9 @@ _SHUTDOWN = object()  # queue sentinel
 class ActionSession:
     """Owns the in-memory MCP client/server pair for one device run."""
 
-    def __init__(self, server: Any):
+    def __init__(self, server: Any, *, close_timeout: float = 5.0):
         self._server = server
+        self._close_timeout = close_timeout
         self._session: Any = None
         self._ready = asyncio.Event()
         self._owner: asyncio.Task | None = None
@@ -205,7 +206,7 @@ class ActionSession:
             return
         self._requests.put_nowait(_SHUTDOWN)
         try:
-            await asyncio.wait_for(asyncio.shield(self._owner), timeout=5.0)
+            await asyncio.wait_for(asyncio.shield(self._owner), timeout=self._close_timeout)
         except (TimeoutError, asyncio.CancelledError, Exception) as e:
             logger.warning(f"Action session owner task did not exit cleanly: {e!r}")
         finally:

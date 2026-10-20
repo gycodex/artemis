@@ -38,6 +38,10 @@ export class DirectControlComponent implements OnInit {
   public summary = signal('Manual Direct verification completed.');
   public actionCount = signal(0);
   public checkpointCount = signal(0);
+  public recording = signal(false);
+  public finalStatus = signal('');
+  public timelinePath = signal<string | null>(null);
+  public checkpointCategory: 'functional' | 'visual' | 'performance' = 'functional';
 
   public canStart = computed(() => !!this.selectedDevice() && !this.busy() && !this.active());
 
@@ -55,6 +59,7 @@ export class DirectControlComponent implements OnInit {
         if (response.device_serial) this.selectedDevice.set(response.device_serial);
         this.actionCount.set(response.result['action_count'] || 0);
         this.checkpointCount.set(response.result['checkpoint_count'] || 0);
+        this.recording.set(!!response.result['recording']);
         if (this.active()) this.observe();
       },
       error: () => {}
@@ -69,6 +74,9 @@ export class DirectControlComponent implements OnInit {
       this.packageName().trim()
     ), response => {
       this.active.set(!!response.result['ok']);
+      this.reportPath.set(null);
+      this.timelinePath.set(null);
+      this.recording.set(false);
       this.observe();
     });
   }
@@ -115,12 +123,12 @@ export class DirectControlComponent implements OnInit {
     this.action('click', { target: [x, y], target_description: 'Web console pointer' }, `Tap [${x}, ${y}]`);
   }
 
-  public addCheckpoint(passed: boolean): void {
+  public addCheckpoint(passed: boolean | 'blocked' | 'skipped' | 'not_run'): void {
     const name = this.checkpointName().trim();
     if (!name) return;
     this.runRequest(
-      `${passed ? 'PASS' : 'FAIL'} checkpoint: ${name}`,
-      this.direct.checkpoint(name, passed, this.checkpointDetails()),
+      `${typeof passed === 'boolean' ? (passed ? 'PASS' : 'FAIL') : passed} checkpoint: ${name}`,
+      this.direct.checkpoint(name, passed, this.checkpointDetails(), true, this.checkpointCategory),
       response => {
         this.checkpointCount.set(response.result['checkpoint']?.index || this.checkpointCount() + 1);
       }
@@ -131,11 +139,24 @@ export class DirectControlComponent implements OnInit {
     this.runRequest('Session finished', this.direct.finish(status, this.summary()), response => {
       this.active.set(false);
       this.reportPath.set(response.result['report_path'] || null);
+      this.timelinePath.set(response.result['timeline_path'] || null);
+      this.finalStatus.set(response.result['status'] || '');
+      this.recording.set(false);
     });
   }
 
+  public toggleRecording(): void {
+    if (!this.active() || this.busy()) return;
+    const starting = !this.recording();
+    this.runRequest(starting ? 'Start recording' : 'Stop recording',
+      this.direct.action(starting ? 'recording_start' : 'recording_stop', {}),
+      response => {
+        if (response.result['ok']) this.recording.set(starting);
+      });
+  }
+
   private action(tool: string, args: Record<string, any>, title: string): void {
-    if (!this.active()) return;
+    if (!this.active() || this.busy()) return;
     this.runRequest(title, this.direct.action(tool, args), () => {
       this.actionCount.update(value => value + 1);
     });
@@ -160,7 +181,7 @@ export class DirectControlComponent implements OnInit {
         }, ...items].slice(0, 30));
         if (!ok) this.error.set(response.texts.join(' ') || 'Direct operation failed.');
         this.busy.set(false);
-        onSuccess?.(response);
+        if (ok) onSuccess?.(response);
       },
       error: (err: any) => {
         const message = err?.error?.detail || err?.message || 'Direct operation failed.';

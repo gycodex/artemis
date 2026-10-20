@@ -52,6 +52,9 @@ def parse_ui_hierarchy(xml_string: str) -> list[dict[str, Any]]:
                     {
                         "text": text,
                         "resource_id": resource_id,
+                        "content_desc": attribs.get("content-desc", ""),
+                        "package": attribs.get("package", ""),
+                        "enabled": attribs.get("enabled", "true") == "true",
                         "class": class_name,
                         "clickable": clickable,
                         "bounds": [x1, y1, x2, y2],

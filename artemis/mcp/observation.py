@@ -81,6 +81,17 @@ async def observe(
     width = height = None
     try:
         xml_hierarchy = device_data.elements
+        # Drivers expose pixel bounds as either XML strings or parsed arrays.
+        # OCR fusion and list formatting consume the XML-style representation.
+        xml_hierarchy = [dict(node) for node in xml_hierarchy]
+        for node in xml_hierarchy:
+            bounds = node.get("bounds")
+            if isinstance(bounds, (list, tuple)) and len(bounds) == 4:
+                x1, y1, x2, y2 = bounds
+                node["bounds"] = f"[{x1},{y1}][{x2},{y2}]"
+            for source, target in (("resource_id", "resource-id"), ("content_desc", "content-desc")):
+                if source in node and target not in node:
+                    node[target] = node[source]
         width = device_data.width or 1080
         height = device_data.height or 2400
         if ctx.device:

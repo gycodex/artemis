@@ -92,3 +92,33 @@ async def test_diagnostic_failure_is_visible_in_report(direct):
     report = Path(result.structuredContent["report_path"]).read_text("utf-8")
     assert "device offline" in report
     assert "incomplete" == result.structuredContent["status"]
+
+
+@pytest.mark.asyncio
+async def test_failed_screenshot_result_prevents_false_pass(direct):
+    await direct.start("screen offline")
+    await direct.checkpoint("home", True, capture_screen=False)
+    direct._capture.return_value = ({"ok": False, "message": "offline"}, None)
+    result = await direct.finish(include_logcat=False)
+    assert result.structuredContent["status"] == "incomplete"
+
+
+@pytest.mark.asyncio
+async def test_observation_accepts_driver_list_bounds():
+    from artemis.mcp.actuators import MockActuator
+    from artemis.mcp.observation import observe
+    actuator = MockActuator()
+    observation, _ = await observe(actuator.ctx, actuator.controller, settle_ms=0)
+    assert observation.hierarchy_ok
+    assert "Settings" in observation.elements_text
+
+
+@pytest.mark.asyncio
+async def test_checkpoint_screenshot_failure_survives_successful_final_capture(direct):
+    await direct.start("missing checkpoint evidence")
+    direct._capture.return_value = ({"ok": False, "message": "checkpoint capture failed"}, None)
+    await direct.checkpoint("home", True)
+    direct._capture.return_value = ({"ok": True}, None)
+    result = await direct.finish(include_logcat=False)
+    assert result.structuredContent["status"] == "incomplete"
+    assert "checkpoint capture failed" in Path(result.structuredContent["report_path"]).read_text("utf-8")

@@ -41,15 +41,17 @@ export class DirectService {
 
   checkpoint(
     name: string,
-    passed: boolean,
+    passed: boolean | 'blocked' | 'skipped' | 'not_run',
     details: string,
-    captureScreen = true
+    captureScreen = true,
+    category: 'functional' | 'visual' | 'performance' = 'functional'
   ): Observable<DirectResponse> {
     return this.http.post<DirectResponse>('/api/direct/checkpoint', {
       name,
-      passed,
+      ...(typeof passed === 'boolean' ? { passed } : { outcome: passed }),
       details,
-      capture_screen: captureScreen
+      capture_screen: captureScreen,
+      category
     });
   }
 

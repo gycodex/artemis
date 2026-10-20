@@ -99,6 +99,7 @@ function formatStartupElapsed(seconds: number): string {
 }
 
 export function formatDirectStatusLabel(status?: string | null): string {
+  if (status === 'incomplete') return '未完整验证';
   return formatTaskStatusLabel(status || 'completed');
 }
 
@@ -127,6 +128,10 @@ export function localizeDirectReportText(report: string): string {
     .replace(/^- Checkpoints:/gm, '- 检查点：')
     .replace(/\*\*(passed|pass)\*\*/gi, '**通过**')
     .replace(/\*\*(failed|fail)\*\*/gi, '**失败**')
+    .replace(/\*\*incomplete\*\*/gi, '**未完整验证**')
+    .replace(/\*\*blocked\*\*/gi, '**阻塞**')
+    .replace(/\*\*skipped\*\*/gi, '**跳过**')
+    .replace(/\*\*not_run\*\*/gi, '**未执行**')
     .replace(/(\d+)\/(\d+) passed/gi, '$1/$2 通过')
     .replace(/`manage_app`/g, '`启动应用`')
     .replace(/`click`/g, '`点击`')

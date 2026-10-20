@@ -78,7 +78,21 @@
         </section>
 
         <section class="tool-card">
+          <h2>Continuous recording</h2>
+          <p>Requires scrcpy and FFmpeg. Finishing the session also stops recording.</p>
+          <button [disabled]="busy()" (click)="toggleRecording()">
+            {{ recording() ? 'Stop recording' : 'Start recording' }}
+          </button>
+        </section>
+
+        <section class="tool-card">
           <h2>Checkpoint</h2>
+          <label>Category</label>
+          <select [(ngModel)]="checkpointCategory">
+            <option value="functional">Functional</option>
+            <option value="visual">Visual</option>
+            <option value="performance">Performance</option>
+          </select>
           <label>Name</label>
           <input [ngModel]="checkpointName()" (ngModelChange)="checkpointName.set($event)" />
           <label>Details</label>
@@ -86,6 +100,11 @@
           <div class="inline-row">
             <button class="pass" (click)="addCheckpoint(true)">Record PASS</button>
             <button class="fail" (click)="addCheckpoint(false)">Record FAIL</button>
+          </div>
+          <div class="inline-row">
+            <button [disabled]="busy()" (click)="addCheckpoint('blocked')">Blocked</button>
+            <button [disabled]="busy()" (click)="addCheckpoint('skipped')">Skipped</button>
+            <button [disabled]="busy()" (click)="addCheckpoint('not_run')">Not run</button>
           </div>
         </section>
 
@@ -119,6 +138,9 @@
 
   @if (error()) { <div class="error-toast">{{ error() }}</div> }
   @if (reportPath()) {
-    <div class="report-banner"><strong>Report generated</strong><code>{{ reportPath() }}</code></div>
+    <div class="report-banner">
+      <strong>Report generated · {{ finalStatus() }}</strong><code>{{ reportPath() }}</code>
+      @if (timelinePath()) { <p>Offline timeline: <code>{{ timelinePath() }}</code></p> }
+    </div>
   }
 </main>
